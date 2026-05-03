@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <StaticWebAssetBasePath>/</StaticWebAssetBasePath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>Cogworks.UmbracoAI.AgentMemory</PackageId>
+    <Product>Cogworks.UmbracoAI.AgentMemory</Product>
+    <Title>Cogworks AgentMemory for Umbraco AI</Title>
+    <Version>0.1.0-beta.1</Version>
+    <Description>Persistent memory and learning layer for Umbraco's AI agent stack — agents that get better every time they run.</Description>
+    <Authors>Cogworks</Authors>
+    <PackageTags>umbraco-marketplace;umbraco;ai;agents;memory;learning;automate;cogworks</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/cogworks/Cogworks.UmbracoAI.AgentMemory</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/cogworks/Cogworks.UmbracoAI.AgentMemory.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Umbraco.Cms.Web.Website" />
+    <PackageReference Include="Umbraco.Cms.Web.Common" />
+    <PackageReference Include="Umbraco.Cms.Api.Common" />
+    <PackageReference Include="Umbraco.Cms.Api.Management" />
+    <PackageReference Include="Umbraco.AI" />
+    <PackageReference Include="Umbraco.AI.Agent" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cogworks.UmbracoAI.AgentMemory.Tests" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Don't include the client folder in the NuGet package —
+         the build output goes to wwwroot/App_Plugins via Vite. -->
+    <Content Remove="Client\**" />
+    <None Include="Client\public\umbraco-package.json" Pack="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="wwwroot\" />
+  </ItemGroup>
+
+  <!-- README in nupkg root for NuGet gallery rendering -->
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

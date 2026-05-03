@@ -1,0 +1,10 @@
+Cogworks.UmbracoAI.AgentMemory
+Copyright (c) 2026 Cogworks
+
+This product includes software developed by:
+- Umbraco HQ (Umbraco CMS, Umbraco.AI, Umbraco.Automate) — used as runtime dependencies
+- Microsoft (Microsoft.Extensions.AI, Microsoft.Agents.AI, EF Core) — used as runtime dependencies
+- The Lit and Vite open-source communities — used in the frontend
+
+Lineage: this package builds on lessons learned from AgentRun.Umbraco (https://github.com/ashallcross/AgentRun)
+which served as the predecessor exploration into agentic AI workflows in Umbraco.

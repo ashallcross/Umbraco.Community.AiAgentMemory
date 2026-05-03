@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Restore .NET dependencies
+        run: dotnet restore Cogworks.UmbracoAI.AgentMemory.slnx
+
+      - name: Build
+        run: dotnet build Cogworks.UmbracoAI.AgentMemory.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test Cogworks.UmbracoAI.AgentMemory.slnx --no-build --configuration Release --logger "trx;LogFileName=test-results.trx"
+
+      - name: Frontend install
+        working-directory: Cogworks.UmbracoAI.AgentMemory/Client
+        run: npm ci
+
+      - name: Frontend build
+        working-directory: Cogworks.UmbracoAI.AgentMemory/Client
+        run: npm run build
+
+      - name: Frontend test
+        working-directory: Cogworks.UmbracoAI.AgentMemory/Client
+        run: npm test

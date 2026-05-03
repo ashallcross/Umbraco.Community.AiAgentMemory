@@ -1,0 +1,108 @@
+##
+## Cogworks.UmbracoAI.AgentMemory repo-split exclusions (CRITICAL — do not edit without reading CLAUDE.md)
+##
+## The following folders are symlinks into the sibling private planning repo
+## at ../Cogworks.UmbracoAI.AgentMemory-planning/. They MUST NOT be tracked by the public repo.
+##
+_bmad-output
+_bmad
+.agents
+.claude
+
+##
+## Build artefacts
+##
+nupkg/
+
+##
+## TestSite local runtime state (per-developer Umbraco DB, profile, instances)
+##
+Cogworks.UmbracoAI.AgentMemory.TestSite/App_Data/
+Cogworks.UmbracoAI.AgentMemory.TestSite/umbraco/Data/
+Cogworks.UmbracoAI.AgentMemory.TestSite/umbraco/Logs/
+
+##
+## .NET / Visual Studio
+##
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+mono_crash.*
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# .NET
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Visual Studio cache/options directory
+.vs/
+
+# .NET Core
+*.dll
+*.pdb
+
+##
+## Node.js / Frontend (Client/)
+##
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Vite build output (goes to wwwroot/App_Plugins, but ignore intermediate)
+.vite/
+dist/
+
+# TypeScript
+*.tsbuildinfo
+
+##
+## OS / Editor
+##
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
+
+##
+## Secrets — never commit
+##
+*.user
+appsettings.Local.json
+appsettings.*.Local.json
+.env
+.env.local
+.env.*.local
+
+##
+## Migration / database files
+##
+*.sqlite.db
+*.sqlite.db-journal
+*.sqlite.db-wal
+*.sqlite.db-shm
