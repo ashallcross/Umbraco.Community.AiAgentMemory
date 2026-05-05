@@ -48,10 +48,14 @@ The package adds plumbing on top of Umbraco.AI's runtime — never replaces it.
 |---|---|
 | Agent runtime, tool loop | Umbraco.AI |
 | Workflow canvas | Umbraco.Automate |
-| Vector store for content | Umbraco.AI.Search |
-| Run history persistence | **Us (`IAgentRunStore`)** |
-| Editor feedback | **Us (`IAgentFeedbackService`)** |
+| Vector store + embedding generator | Umbraco.AI.Search (we are a tenant under index alias `cogworks-agent-memory`) |
+| Run history **persistence** | **Upstream — `AIAuditingChatMiddleware` writes to `AIAuditLog`. We do NOT own a runs table.** |
+| Run history **reads** | **Us (`IAgentRunReader`, composes on `IAIAuditLogService`, groups by `Metadata["Umbraco.AI.Agent.RunId"]`)** |
+| Editor feedback | **Us (`IAgentFeedbackService` + `cogworks_agent_memory_feedback` table)** |
+| Memory entries (digest + embedding) | **Us (`cogworks_agent_memory_entries` table, decoupled from audit-log retention)** |
 | Memory retrieval & injection | **Us (`IMemoryRetriever`, `MemoryInjectionMiddleware`)** |
+
+**Architectural pivot (2026-05-03, locked in `15-upstream-reuse-investigation.md`):** earlier drafts proposed an `IAgentRunStore` write path and AGUI subscriber. Both are gone. Upstream's auditing middleware already captures everything we need; we compose, we don't duplicate. Any downstream agent or document still referencing `IAgentRunStore` ownership should be treated as pre-pivot and corrected.
 
 ## Key planning docs
 
