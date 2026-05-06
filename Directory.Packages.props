@@ -19,8 +19,11 @@
     <PackageVersion Include="Umbraco.AI.Agent.Copilot" Version="1.0.0-alpha6" />
     <PackageVersion Include="Umbraco.AI.Anthropic" Version="1.3.0" />
     <PackageVersion Include="Umbraco.AI.OpenAI" Version="1.2.0" />
-    <!-- Umbraco.AI.Search is optional — uncomment when implementing semantic memory retrieval -->
-    <!-- <PackageVersion Include="Umbraco.AI.Search" Version="1.0.0" /> -->
+    <!-- Umbraco.AI.Search pinned to 1.0.0-beta3 prerelease per AR19 + NFR-C3.
+         Must NOT float — coordinated patch release required to bump.
+         Active reference begins in Story 3.1 (background indexer); pin landed in
+         Story 0.B (alias-mechanics spike) to lock the lockfile cross-reference. -->
+    <PackageVersion Include="Umbraco.AI.Search" Version="1.0.0-beta3" />
 
     <!-- Microsoft.Extensions.AI primitives (transitive via Umbraco.AI 1.8.0 → 10.2.0).
          Pinned at the lower bound Umbraco.AI requires; bumping when Umbraco.AI bumps
