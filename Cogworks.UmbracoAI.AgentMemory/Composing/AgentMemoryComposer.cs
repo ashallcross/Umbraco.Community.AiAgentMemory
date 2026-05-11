@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Cogworks.UmbracoAI.AgentMemory.Configuration;
 using Cogworks.UmbracoAI.AgentMemory.Feedback;
 using Cogworks.UmbracoAI.AgentMemory.Memory;
@@ -23,6 +25,17 @@ public sealed class AgentMemoryComposer : IComposer
         // Bind options
         builder.Services.Configure<AgentMemoryOptions>(
             builder.Config.GetSection(Constants.ConfigSection));
+
+        // Validate options at first read (AR3). Surfaces invariant violations
+        // as OptionsValidationException when the agent-memory pipeline first
+        // reads IOptionsMonitor<AgentMemoryOptions>.CurrentValue — not boot,
+        // not silently downstream. TryAddEnumerable is the documented
+        // Microsoft pattern for IValidateOptions<> registration: it preserves
+        // the IEnumerable<IValidateOptions<TOptions>> contract that
+        // Microsoft.Extensions.Options resolves at first read, allowing
+        // adopters to layer additional validators without colliding.
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AgentMemoryOptions>, AgentMemoryOptionsValidator>());
 
         // Persistence (Story 1.1) — DbContext maps onto the schema created by
         // AgentMemoryMigrationPlan / AddAgentMemorySchema. Repositories own the

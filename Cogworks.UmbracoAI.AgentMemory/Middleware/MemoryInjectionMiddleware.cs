@@ -13,8 +13,8 @@ namespace Cogworks.UmbracoAI.AgentMemory.Middleware;
 /// <remarks>
 /// <para>
 /// This is the load-bearing middleware that closes the learning loop. Per-agent
-/// opt-in via <see cref="AgentMemoryOptions.MemoryEnabledByDefault"/> + (later)
-/// per-agent setting.
+/// opt-in via <see cref="AgentMemoryOptions.EnabledAgents"/> (FR27 / FR28 / FR29 /
+/// FR38 — the only enable surface in v0.1; no global on-switch exists).
 /// </para>
 /// <para>
 /// Implementation is placeholder for v0.1 scaffold. Week 3 of the sprint plan

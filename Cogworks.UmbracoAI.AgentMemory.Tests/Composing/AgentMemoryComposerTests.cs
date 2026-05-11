@@ -71,6 +71,30 @@ public class AgentMemoryComposerStartupValidationTests
     }
 
     [Test]
+    public void Compose_RegistersAgentMemoryOptionsValidator()
+    {
+        // Story 1.3 — IValidateOptions<AgentMemoryOptions> → AgentMemoryOptionsValidator
+        // at Singleton lifetime, via TryAddEnumerable (documented MS pattern;
+        // preserves IEnumerable<IValidateOptions<>> contract so adopters can
+        // layer additional validators without colliding).
+        // Calling Compose twice pins TryAddEnumerable's idempotency: a
+        // regression to plain AddSingleton would produce a second descriptor
+        // on the second call and trip the Exactly(1) assertion.
+        var (builder, services) = CreateBuilder();
+
+        new AgentMemoryComposer().Compose(builder);
+        new AgentMemoryComposer().Compose(builder);
+
+        Assert.That(services, Has.Exactly(1).Matches<ServiceDescriptor>(d =>
+            d.ServiceType == typeof(IValidateOptions<AgentMemoryOptions>)
+            && d.ImplementationType == typeof(AgentMemoryOptionsValidator)
+            && d.Lifetime == ServiceLifetime.Singleton),
+            "AgentMemoryComposer must register AgentMemoryOptionsValidator as the "
+            + "(exactly one) IValidateOptions<AgentMemoryOptions> at Singleton lifetime "
+            + "via TryAddEnumerable — idempotent under repeated Compose() calls.");
+    }
+
+    [Test]
     public void Compose_RegistersAgentRunReader()
     {
         // Story 1.2 — IAgentRunReader → AgentRunReader at Singleton lifetime.

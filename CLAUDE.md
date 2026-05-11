@@ -32,6 +32,7 @@ A typical story completion produces two separate commits across the two repos. T
 - **Frontend tests**: `npm test` from `Cogworks.UmbracoAI.AgentMemory/Client/`
 - **Frontend build before commit**: `npm run build` from `Cogworks.UmbracoAI.AgentMemory/Client/` so `wwwroot/App_Plugins/` is current
 - **TestSite**: uses Cogworks Clean starter kit (Clean + Clean.Core 7.0.5) — both packages required, version-locked
+- **TestSite scaffolding**: always start from `dotnet new umbraco`, never hand-roll. Delete the template's nested `Directory.Packages.props` (it shadows the repo root CPM and causes silent version-pin drift). Lesson: Story 1.1 hand-roll caused boot crash; the re-scaffold-from-template fix is the canonical recipe (DRIFT-1.1-3 in `1-1-outcome.md`).
 - **TFM**: net10.0
 - **Umbraco**: 17.3.2 (pinned via Directory.Packages.props)
 - **Central Package Management**: yes — all package versions live in Directory.Packages.props
