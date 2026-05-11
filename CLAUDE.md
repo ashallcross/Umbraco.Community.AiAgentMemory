@@ -40,6 +40,7 @@ A typical story completion produces two separate commits across the two repos. T
 - **Database tables**: prefix `cogworks_agent_memory_` for our tables to avoid collision with Umbraco core / Umbraco.AI tables
 - **Migration pattern**: `PackageMigrationPlan` with named GUID steps, mirroring AgentRun's `AgentRunMigrationPlan`
 - **Spike harness lifetime**: throwaway harnesses outside the repo's accountability boundary (e.g. `~/Documents/Spike0A-TestSite/` for Epic 0) are NOT subject to the public-repo "zero diff" cleanup contract. Keep them alive until the next mass-context-loss boundary (epic retro), not at story cleanup. Lesson: Story 0.A 2026-05-05 prematurely deleted the harness; Story 0.B reversed that policy.
+- **Test-density principle (AR30)**: match test density to actual risk — happy path + 1 override path + 1-2 genuine edge cases per surface. Skip mirror-pattern tests when underlying helper is already pinned.
 
 ## Architecture
 

@@ -16,10 +16,17 @@ public static class Constants
     public const string ApiRoutePrefix = "umbraco/cogworks-agent-memory/api";
 
     /// <summary>
-    /// Prefix used for our database tables to avoid collision with Umbraco core
-    /// and Umbraco.AI tables.
+    /// Database table holding editor feedback against agent runs. The
+    /// <c>cogworks_agent_memory_*</c> prefix is a runtime contract for adopter
+    /// sites and does not participate in the brand rename pass (AR6 + AR20).
     /// </summary>
-    public const string TablePrefix = "cogworksAgentMemory";
+    public const string FeedbackTableName = "cogworks_agent_memory_feedback";
+
+    /// <summary>
+    /// Database table holding memory entries (digest text + vector reference).
+    /// Same rename-safe contract as <see cref="FeedbackTableName"/> (AR6 + AR20).
+    /// </summary>
+    public const string MemoryEntriesTableName = "cogworks_agent_memory_entries";
 
     /// <summary>
     /// Migration plan name (also used as the migration history key).

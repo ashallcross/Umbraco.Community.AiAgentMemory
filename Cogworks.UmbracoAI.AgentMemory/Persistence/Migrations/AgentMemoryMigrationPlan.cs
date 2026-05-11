@@ -19,14 +19,10 @@ public sealed class AgentMemoryMigrationPlan : PackageMigrationPlan
     }
 
     protected override void DefinePlan()
-    {
-        // Week 1 — first migration adds run history table.
-        // Replace this empty plan with .To<AddAgentRunsTable>("...GUID...") once the
-        // migration class is implemented.
-        From(string.Empty);
-
-        // Future:
-        // .To<AddAgentRunsTable>("12345678-1234-1234-1234-123456789012")
-        // .To<AddAgentRunFeedbackTable>("23456789-2345-2345-2345-234567890123")
-    }
+        => From(string.Empty)
+            // Story 1.1 (2026-05-10) — single batched step creates both package
+            // tables (cogworks_agent_memory_feedback + cogworks_agent_memory_entries).
+            // GUID is stable forever — once shipped, future schema changes append
+            // a new step with a new GUID, NEVER mutate this one.
+            .To<AddAgentMemorySchema>("8B3A4D6E-1F92-4C5B-A7D8-9E0F1B2C3D4A");
 }

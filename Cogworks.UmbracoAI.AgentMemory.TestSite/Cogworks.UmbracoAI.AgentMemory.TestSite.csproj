@@ -3,7 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Disable compression. Umbraco backoffice files are pre-compressed by node and should not be re-handled by dotnet -->
+    <!-- Disable compression. Umbraco backoffice files are pre-compressed by node and should not be re-handled by dotnet. -->
     <CompressionEnabled>false</CompressionEnabled>
     <UserSecretsId>cogworks-agentmemory-testsite</UserSecretsId>
   </PropertyGroup>
@@ -12,14 +12,18 @@
     <!-- Umbraco core -->
     <PackageReference Include="Umbraco.Cms" />
     <PackageReference Include="Umbraco.Cms.DevelopmentMode.Backoffice" />
+  </ItemGroup>
 
+  <ItemGroup>
     <!-- Umbraco.AI stack — required to test agent memory end-to-end -->
     <PackageReference Include="Umbraco.AI" />
     <PackageReference Include="Umbraco.AI.Agent" />
     <PackageReference Include="Umbraco.AI.Agent.Copilot" />
     <PackageReference Include="Umbraco.AI.Anthropic" />
     <PackageReference Include="Umbraco.AI.OpenAI" />
+  </ItemGroup>
 
+  <ItemGroup>
     <!-- Cogworks Clean starter kit — both packages required, version-locked.
          Clean (meta) drives demo content via package migration on first run.
          Clean.Core ships the components library Clean depends on. -->
@@ -41,7 +45,7 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <!-- Required for Umbraco backoffice to function correctly when published -->
+    <!-- Razor files are needed for the backoffice to work correctly when published -->
     <CopyRazorGenerateFilesToPublishDirectory>true</CopyRazorGenerateFilesToPublishDirectory>
   </PropertyGroup>
 
