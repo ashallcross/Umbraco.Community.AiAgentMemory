@@ -4,6 +4,7 @@ using Cogworks.UmbracoAI.AgentMemory.Feedback;
 using Cogworks.UmbracoAI.AgentMemory.Memory;
 using Cogworks.UmbracoAI.AgentMemory.Persistence;
 using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
+using Cogworks.UmbracoAI.AgentMemory.Runs;
 using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 using Umbraco.Extensions;
@@ -32,6 +33,10 @@ public sealed class AgentMemoryComposer : IComposer
                 options.UseDatabaseProvider(providerName!, connectionString!));
         builder.Services.AddScoped<EFCoreAgentRunFeedbackRepository>();
         builder.Services.AddScoped<EFCoreMemoryEntryRepository>();
+
+        // Run reading (Story 1.2 — composes on upstream IAIAuditLogService;
+        // we do NOT own a runs table, AR8/AR9).
+        builder.Services.AddSingleton<IAgentRunReader, AgentRunReader>();
 
         // Feedback collection (Story 2.1 replaces the Null* placeholder)
         builder.Services.AddSingleton<IAgentFeedbackService, NullAgentFeedbackService>();
