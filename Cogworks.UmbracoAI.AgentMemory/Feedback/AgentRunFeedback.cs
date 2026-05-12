@@ -5,7 +5,7 @@ namespace Cogworks.UmbracoAI.AgentMemory.Feedback;
 /// </summary>
 public sealed record AgentRunFeedback(
     Guid Id,
-    Guid RunId,
+    string RunId,
     Guid AgentId,
     FeedbackScore Score,
     string? Comment,

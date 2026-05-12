@@ -51,8 +51,15 @@ public sealed class AgentMemoryComposer : IComposer
         // we do NOT own a runs table, AR8/AR9).
         builder.Services.AddSingleton<IAgentRunReader, AgentRunReader>();
 
-        // Feedback collection (Story 2.1 replaces the Null* placeholder)
-        builder.Services.AddSingleton<IAgentFeedbackService, NullAgentFeedbackService>();
+        // Clock dependency for AgentFeedbackService supersede-CreatedUtc
+        // determinism in tests + explicit clock-dependency in production.
+        // TryAddSingleton ensures host-supplied TimeProvider (if any) wins.
+        builder.Services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+
+        // Feedback collection (Story 2.1) — Scoped to match the EF Core
+        // repository's scope-provider lifetime; no captive-dep risk
+        // introduced (Scoped-on-Scoped).
+        builder.Services.AddScoped<IAgentFeedbackService, AgentFeedbackService>();
 
         // Memory retrieval (Phase 2 — depends on Umbraco.AI.Search vector store)
         builder.Services.AddSingleton<IMemoryDigestService, NullMemoryDigestService>();
