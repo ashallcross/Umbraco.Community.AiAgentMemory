@@ -11,9 +11,20 @@ public static class Constants
     public const string ConfigSection = "Cogworks:AgentMemory";
 
     /// <summary>
-    /// Backoffice API route prefix.
+    /// Swagger document name + Management-API operation-grouping identifier
+    /// for this package's controllers. Used by
+    /// <c>AgentMemoryBackofficeApiComposer</c>'s <c>SwaggerDoc</c> registration
+    /// and the controllers' <c>[MapToApi(Constants.ApiName)]</c> attribute.
     /// </summary>
-    public const string ApiRoutePrefix = "umbraco/cogworks-agent-memory/api";
+    /// <remarks>
+    /// The resolved Management API prefix is
+    /// <c>/umbraco/management/api/v1/cogworks-agent-memory/</c> via
+    /// <c>[VersionedApiBackOfficeRoute("cogworks-agent-memory/...")]</c> (the
+    /// framework prepends <c>/management/api/v{version:apiVersion}/</c>).
+    /// AR21 brand-rename: this value is renamed in lockstep with PackageId /
+    /// namespace at the brand-rename pass.
+    /// </remarks>
+    public const string ApiName = "cogworks-agent-memory";
 
     /// <summary>
     /// Database table holding editor feedback against agent runs. The

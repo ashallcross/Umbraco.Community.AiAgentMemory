@@ -8,6 +8,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Swashbuckle.AspNetCore.SwaggerGen;
+using Umbraco.Cms.Api.Common.OpenApi;
 using Umbraco.Cms.Core.DependencyInjection;
 using Umbraco.Cms.Persistence.EFCore.Scoping;
 
@@ -286,6 +288,68 @@ public class AgentMemoryComposerStartupValidationTests
             "Story 2.1 must not introduce a Singleton consuming a Scoped repository — "
             + "if a future story does, this check fires and the new story owes a real-"
             + "provider-build assertion per Story 1.1 NOTE-0.5.");
+    }
+
+    [Test]
+    public void Compose_RegistersAgentMemoryBackofficeApiComposer_SwaggerDocAndOperationFilter()
+    {
+        // Story 2.2 — AgentMemoryBackofficeApiComposer wires the Management-API
+        // controllers into Umbraco's Swagger doc generation + auth requirement
+        // pipeline. Descriptor inspection only.
+        //
+        // Calling Compose twice pins TryAddEnumerable's idempotency (matches
+        // Compose_RegistersAgentMemoryOptionsValidator's double-compose
+        // contract — a regression to plain AddSingleton or Configure<>-lambda
+        // produces second descriptors on the second call and trips Exactly(1).
+        var (builder, services) = CreateBuilder();
+
+        new AgentMemoryBackofficeApiComposer().Compose(builder);
+        new AgentMemoryBackofficeApiComposer().Compose(builder);
+
+        Assert.That(services, Has.Exactly(1).Matches<ServiceDescriptor>(d =>
+            d.ServiceType == typeof(IOperationIdHandler)
+            && d.Lifetime == ServiceLifetime.Singleton),
+            "AgentMemoryBackofficeApiComposer must register IOperationIdHandler at Singleton "
+            + "lifetime via TryAddEnumerable — idempotent under repeated Compose() calls.");
+
+        Assert.That(services, Has.Exactly(1).Matches<ServiceDescriptor>(d =>
+            d.ServiceType == typeof(IConfigureOptions<SwaggerGenOptions>)
+            && d.ImplementationType is not null
+            && d.ImplementationType.Assembly == typeof(AgentMemoryBackofficeApiComposer).Assembly),
+            "AgentMemoryBackofficeApiComposer must register exactly one typed "
+            + "IConfigureOptions<SwaggerGenOptions> from this assembly via TryAddEnumerable "
+            + "(SwaggerDoc + OperationFilter<AgentMemoryOperationSecurityFilter>). Other "
+            + "framework IConfigureOptions<SwaggerGenOptions> from Umbraco / Swashbuckle "
+            + "live in other assemblies and are filtered out by the assembly check.");
+    }
+
+    [Test]
+    public void Compose_StartupValidation_BackofficeApi_NoCaptiveDependency()
+    {
+        // Story 2.2 captive-dep check after composing both composers together.
+        // IOperationIdHandler is Singleton with only Singleton deps
+        // (IOptions<ApiVersioningOptions>). No new captive-dep introduced.
+        var (builder, services) = CreateBuilder();
+
+        new AgentMemoryComposer().Compose(builder);
+        new AgentMemoryBackofficeApiComposer().Compose(builder);
+
+        var ourSingletonsTakingScopedDeps = services
+            .Where(d => d.Lifetime == ServiceLifetime.Singleton
+                        && d.ImplementationType is not null
+                        && d.ImplementationType.Assembly == typeof(AgentMemoryComposer).Assembly)
+            .Where(d => d.ImplementationType!.GetConstructors()
+                .Any(c => c.GetParameters().Any(p =>
+                    p.ParameterType == typeof(EFCoreAgentRunFeedbackRepository)
+                    || p.ParameterType == typeof(EFCoreMemoryEntryRepository)
+                    || (p.ParameterType.IsGenericType
+                        && p.ParameterType.GetGenericTypeDefinition() == typeof(IEFCoreScopeProvider<>)))))
+            .ToArray();
+
+        Assert.That(ourSingletonsTakingScopedDeps, Is.Empty,
+            "Story 2.2 must not introduce a Singleton consuming a Scoped repository — "
+            + "AgentMemoryBackofficeApiComposer's IOperationIdHandler is Singleton with "
+            + "only Singleton deps (IOptions<ApiVersioningOptions>).");
     }
 
     private static void AssertScopedRegistered<T>(IServiceCollection services)
