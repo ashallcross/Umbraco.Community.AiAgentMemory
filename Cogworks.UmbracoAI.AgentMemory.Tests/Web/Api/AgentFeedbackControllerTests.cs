@@ -1,4 +1,5 @@
 using Cogworks.UmbracoAI.AgentMemory.Feedback;
+using Cogworks.UmbracoAI.AgentMemory.Runs;
 using Cogworks.UmbracoAI.AgentMemory.Web.Api;
 using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
 using Microsoft.AspNetCore.Http;
@@ -10,15 +11,17 @@ using Umbraco.Cms.Core.Security;
 namespace Cogworks.UmbracoAI.AgentMemory.Tests.Web.Api;
 
 /// <summary>
-/// Story 2.2 — AgentFeedbackController tests. 6 controller-layer methods
-/// (one parameterised) + 2 composer-layer extensions live in
-/// <see cref="Composing.AgentMemoryComposerStartupValidationTests"/>.
+/// Story 2.2 + Story 2.3 Task 0.6 amendment — AgentFeedbackController tests. The
+/// controller's request body shape moved from 4 fields (runId/agentId/score/comment)
+/// to 3 fields (runId/score/comment); <c>agentId</c> is now resolved server-side
+/// via <see cref="IAgentRunReader.GetRunsForThreadAsync"/>.
 /// </summary>
 [TestFixture]
 public class AgentFeedbackControllerTests
 {
     private IAgentFeedbackService _feedbackService = null!;
     private IBackOfficeSecurityAccessor _securityAccessor = null!;
+    private IAgentRunReader _runReader = null!;
     private ILogger<AgentFeedbackController> _logger = null!;
     private AgentFeedbackController _controller = null!;
     private Guid _resolvedUserKey;
@@ -29,6 +32,7 @@ public class AgentFeedbackControllerTests
     {
         _feedbackService = Substitute.For<IAgentFeedbackService>();
         _securityAccessor = Substitute.For<IBackOfficeSecurityAccessor>();
+        _runReader = Substitute.For<IAgentRunReader>();
         _logger = Substitute.For<ILogger<AgentFeedbackController>>();
 
         // Default: authenticated user with a valid GUID.
@@ -41,7 +45,14 @@ public class AgentFeedbackControllerTests
 
         _agentId = Guid.NewGuid();
 
-        _controller = new AgentFeedbackController(_feedbackService, _securityAccessor, _logger);
+        // Default: reader returns a single matching AgentRunRecord carrying
+        // _agentId. Story 2.3 Task 0.6 — controller resolves agentId via this
+        // lookup instead of trusting a client-supplied value.
+        _runReader.GetRunsForThreadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId) }));
+
+        _controller = new AgentFeedbackController(_feedbackService, _securityAccessor, _runReader, _logger);
     }
 
     [TearDown]
@@ -50,12 +61,27 @@ public class AgentFeedbackControllerTests
         _controller?.Dispose();
     }
 
+    private static AgentRunRecord MakeRunRecord(Guid agentId, string runId = "run-1") => new(
+        RunId: runId,
+        AgentId: agentId,
+        AgentVersion: 1,
+        StartedUtc: DateTime.UtcNow.AddMinutes(-1),
+        CompletedUtc: DateTime.UtcNow,
+        AggregateStatus: AgentRunStatus.Succeeded,
+        Error: null,
+        PromptSnapshotJoined: "[user] hello",
+        ResponseSnapshotJoined: "[assistant] hi",
+        TokenCountInput: 100,
+        TokenCountOutput: 20,
+        ThreadId: runId,
+        UserId: "user-1",
+        TraceId: "trace-1");
+
     [Test]
-    public async Task PostAsync_HappyPath_CallsServiceWithResolvedHostUserGuid()
+    public async Task PostAsync_HappyPath_ResolvesAgentIdFromReader_CallsServiceWithResolvedHostUserGuid()
     {
         var request = new AgentFeedbackPostRequest(
             RunId: "run-1",
-            AgentId: _agentId,
             Score: FeedbackScore.ThumbsDown,
             Comment: "actually wrong");
 
@@ -64,6 +90,11 @@ public class AgentFeedbackControllerTests
         Assert.That(result, Is.InstanceOf<OkResult>(),
             "Happy path returns Ok() (HTTP 200, empty body) per AC4.");
 
+        // Reader was queried for the supplied runId (= upstream ThreadId).
+        await _runReader.Received(1).GetRunsForThreadAsync("run-1", Arg.Any<CancellationToken>());
+
+        // Service was called with agentId resolved from the reader (NOT a
+        // client-supplied value — the request body no longer carries it).
         await _feedbackService.Received(1).RecordFeedbackAsync(
             "run-1",
             _agentId,
@@ -73,26 +104,52 @@ public class AgentFeedbackControllerTests
             Arg.Any<CancellationToken>());
     }
 
+    [Test]
+    public async Task PostAsync_RunIdNotFoundInReader_Returns404ProblemDetails_NoServiceCall()
+    {
+        // Story 2.3 Task 0.6 — new 404 path. The reader returns empty when no
+        // AIAuditLog row matches the supplied runId (= upstream ThreadId). This
+        // happens when (a) the audit row hasn't been written yet (race window
+        // between agent completion and ASP.NET-Core-emitted feedback POST), OR
+        // (b) the upstream Fork (i) metadata propagation isn't deployed.
+        _runReader.GetRunsForThreadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(Array.Empty<AgentRunRecord>()));
+
+        var request = new AgentFeedbackPostRequest("run-missing", FeedbackScore.ThumbsUp, null);
+
+        var result = await _controller.PostAsync(request, CancellationToken.None);
+
+        Assert.That(result, Is.InstanceOf<ObjectResult>());
+        var objectResult = (ObjectResult)result;
+        Assert.That(objectResult.StatusCode, Is.EqualTo(StatusCodes.Status404NotFound));
+        Assert.That(objectResult.Value, Is.InstanceOf<ProblemDetails>());
+        var problem = (ProblemDetails)objectResult.Value!;
+        Assert.That(problem.Title, Is.EqualTo("Run not found."));
+        Assert.That(problem.Detail, Does.Contain("run-missing"));
+
+        // Service is NEVER called when the run can't be resolved.
+        await _feedbackService.DidNotReceiveWithAnyArgs().RecordFeedbackAsync(
+            default!, default, default, default, default, default);
+    }
+
     private static IEnumerable<TestCaseData> InvalidPayloadCases()
     {
-        // AC5 — six validation rules, first-failure-return semantics.
+        // AC5 — validation rules, first-failure-return semantics. Story 2.3
+        // Task 0.6 removes the Guid.Empty AgentId case (field dropped from POCO).
         yield return new TestCaseData(
             (AgentFeedbackPostRequest?)null,
             "Request body is required.");
         yield return new TestCaseData(
-            new AgentFeedbackPostRequest(string.Empty, Guid.NewGuid(), FeedbackScore.ThumbsUp, null),
+            new AgentFeedbackPostRequest(string.Empty, FeedbackScore.ThumbsUp, null),
             "runId is required");
         yield return new TestCaseData(
-            new AgentFeedbackPostRequest(new string('x', AgentFeedbackController.RunIdMaxChars + 1), Guid.NewGuid(), FeedbackScore.ThumbsUp, null),
+            new AgentFeedbackPostRequest(new string('x', AgentFeedbackController.RunIdMaxChars + 1), FeedbackScore.ThumbsUp, null),
             "runId cannot exceed 256");
         yield return new TestCaseData(
-            new AgentFeedbackPostRequest("run-1", Guid.Empty, FeedbackScore.ThumbsUp, null),
-            "agentId is required and cannot be Guid.Empty");
-        yield return new TestCaseData(
-            new AgentFeedbackPostRequest("run-1", Guid.NewGuid(), (FeedbackScore)99, null),
+            new AgentFeedbackPostRequest("run-1", (FeedbackScore)99, null),
             "score must be 0");
         yield return new TestCaseData(
-            new AgentFeedbackPostRequest("run-1", Guid.NewGuid(), FeedbackScore.ThumbsUp, new string('x', AgentFeedbackController.CommentMaxChars + 1)),
+            new AgentFeedbackPostRequest("run-1", FeedbackScore.ThumbsUp, new string('x', AgentFeedbackController.CommentMaxChars + 1)),
             "comment cannot exceed 4000");
     }
 
@@ -115,6 +172,9 @@ public class AgentFeedbackControllerTests
         // Service is NEVER called when validation fails (first-failure return).
         await _feedbackService.DidNotReceiveWithAnyArgs().RecordFeedbackAsync(
             default!, default, default, default, default, default);
+        // Reader is NEVER called either — validation short-circuits before lookup.
+        await _runReader.DidNotReceiveWithAnyArgs().GetRunsForThreadAsync(
+            default!, default);
     }
 
     [Test]
@@ -125,7 +185,7 @@ public class AgentFeedbackControllerTests
         // called.
         _securityAccessor.BackOfficeSecurity.Returns((IBackOfficeSecurity?)null);
 
-        var request = new AgentFeedbackPostRequest("run-1", _agentId, FeedbackScore.ThumbsUp, null);
+        var request = new AgentFeedbackPostRequest("run-1", FeedbackScore.ThumbsUp, null);
 
         var result = await _controller.PostAsync(request, CancellationToken.None);
 
@@ -151,7 +211,7 @@ public class AgentFeedbackControllerTests
         emptySecurity.CurrentUser.Returns((IUser?)null);
         _securityAccessor.BackOfficeSecurity.Returns(emptySecurity);
 
-        var request = new AgentFeedbackPostRequest("run-1", _agentId, FeedbackScore.ThumbsUp, null);
+        var request = new AgentFeedbackPostRequest("run-1", FeedbackScore.ThumbsUp, null);
 
         var result = await _controller.PostAsync(request, CancellationToken.None);
 
@@ -177,7 +237,7 @@ public class AgentFeedbackControllerTests
         emptySecurity.CurrentUser.Returns(emptyUser);
         _securityAccessor.BackOfficeSecurity.Returns(emptySecurity);
 
-        var request = new AgentFeedbackPostRequest("run-1", _agentId, FeedbackScore.ThumbsUp, null);
+        var request = new AgentFeedbackPostRequest("run-1", FeedbackScore.ThumbsUp, null);
 
         var result = await _controller.PostAsync(request, CancellationToken.None);
 
@@ -217,7 +277,7 @@ public class AgentFeedbackControllerTests
                 Arg.Any<string?>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException(new OperationCanceledException()));
 
-        var request = new AgentFeedbackPostRequest("run-1", _agentId, FeedbackScore.ThumbsUp, null);
+        var request = new AgentFeedbackPostRequest("run-1", FeedbackScore.ThumbsUp, null);
 
         Assert.ThrowsAsync<OperationCanceledException>(
             () => _controller.PostAsync(request, cts.Token));
@@ -235,7 +295,7 @@ public class AgentFeedbackControllerTests
                 Arg.Any<string?>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException(new InvalidOperationException("DB unreachable")));
 
-        var request = new AgentFeedbackPostRequest("run-1", _agentId, FeedbackScore.ThumbsUp, null);
+        var request = new AgentFeedbackPostRequest("run-1", FeedbackScore.ThumbsUp, null);
 
         Assert.ThrowsAsync<InvalidOperationException>(
             () => _controller.PostAsync(request, CancellationToken.None));

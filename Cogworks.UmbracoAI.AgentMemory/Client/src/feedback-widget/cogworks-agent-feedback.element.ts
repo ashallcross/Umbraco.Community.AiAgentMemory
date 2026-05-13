@@ -1,104 +1,420 @@
-import { LitElement, html, css } from "@umbraco-cms/backoffice/external/lit";
-import { customElement, property, state } from "@umbraco-cms/backoffice/external/lit";
+import { html, css, customElement, state, nothing } from "@umbraco-cms/backoffice/external/lit";
+import { UmbModalBaseElement } from "@umbraco-cms/backoffice/modal";
+import { UMB_AUTH_CONTEXT } from "@umbraco-cms/backoffice/auth";
+import {
+  authenticatedFetch,
+  AuthContextUnavailableError,
+} from "../util/authenticated-fetch.js";
 
 /**
- * Inline feedback widget for an agent run.
+ * Modal data shape — populated by Bellissima when our extension replaces
+ * Automate's `Ua.Modal.RunDetail` (Strategy B locked at Story 2.3 Task 0).
+ * The modal hands us a single field: `runId`. Semantically this is the
+ * upstream `Metadata.Umbraco.AI.Agent.ThreadId` (the workflow-run-level
+ * conversation grouping key, 1 per Automate workflow run); the server
+ * resolves agentId from it via `IAgentRunReader.GetRunsForThreadAsync`.
+ */
+type AgentFeedbackModalData = {
+  runId: string;
+};
+
+type ScoreString = "ThumbsUp" | "ThumbsDown";
+type WidgetState = "idle" | "submitting" | "success" | "error";
+
+/**
+ * Story 2.3 — inline feedback widget for an agent run.
  *
- * Renders thumbs-up / thumbs-down buttons + a comment textarea. On submit,
- * POSTs to /umbraco/cogworks-agent-memory/api/v1/feedback. Designed to drop
- * into the Automate run explorer next to a RunAgentAction step output, or
- * inside the Copilot chat after each agent message.
+ * Replaces `Ua.Modal.RunDetail` (Strategy B locked at Task 0). Renders thumbs-up /
+ * thumbs-down + optional comment + submit. On submit, POSTs to
+ * `/umbraco/management/api/v1/cogworks-agent-memory/feedback` (Story 2.2's
+ * controller) via bearer-token auth (`UMB_AUTH_CONTEXT.getOpenApiConfiguration()`).
  *
- * v0.1 placeholder — Week 2 of the sprint plan completes the implementation.
+ * NFR-A1/A2: thumbs state distinguished by BOTH icon AND text label (never colour
+ * alone); `aria-pressed` toggles on selected thumb; `:focus-visible` outlines on
+ * all controls; success state announced via `role="status"`; error state via
+ * `role="alert"`.
+ *
+ * XSS defence (AC9): all rendered content goes through Lit's auto-encoding
+ * template interpolation. `unsafeHTML` is NEVER imported.
  */
 @customElement("cogworks-agent-feedback")
-export class CogworksAgentFeedbackElement extends LitElement {
-  @property({ type: String, attribute: "run-id" })
-  runId = "";
+export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
+  AgentFeedbackModalData,
+  // The modal doesn't emit a return value — feedback is fire-and-go via POST.
+  // The editor closes the modal manually (X / Esc) after the success state.
+  void
+> {
+  @state() private _score: ScoreString | null = null;
+  @state() private _comment = "";
+  @state() private _state: WidgetState = "idle";
+  @state() private _errorMessage = "";
 
-  @state()
-  private _score: "up" | "down" | null = null;
+  private _abortController: AbortController | null = null;
 
-  @state()
-  private _comment = "";
+  override disconnectedCallback() {
+    this._abortController?.abort();
+    super.disconnectedCallback();
+  }
 
-  @state()
-  private _submitted = false;
+  override render() {
+    return html`
+      ${this._state === "success" ? this._renderSuccess() : this._renderForm()}
+      ${this._state === "error" ? this._renderError() : nothing}
+    `;
+  }
 
-  static styles = css`
+  private _renderForm() {
+    const scoreSelected = this._score !== null;
+    const submitDisabled = !scoreSelected || this._state === "submitting";
+
+    return html`
+      <header class="modal-head">
+        <h3>How was this run?</h3>
+        <button
+          type="button"
+          class="close-icon"
+          aria-label="Close"
+          title="Close"
+          @click=${this._dismiss}
+        >
+          ✕
+        </button>
+      </header>
+
+      <div class="row">
+        <button
+          type="button"
+          class="thumb ${this._score === "ThumbsUp" ? "active" : ""}"
+          aria-label="Helpful"
+          aria-pressed="${this._score === "ThumbsUp"}"
+          @click=${() => this._selectScore("ThumbsUp")}
+        >
+          👍 Helpful
+        </button>
+        <button
+          type="button"
+          class="thumb ${this._score === "ThumbsDown" ? "active" : ""}"
+          aria-label="Not helpful"
+          aria-pressed="${this._score === "ThumbsDown"}"
+          @click=${() => this._selectScore("ThumbsDown")}
+        >
+          👎 Not helpful
+        </button>
+      </div>
+
+      <textarea
+        ?hidden=${!scoreSelected}
+        aria-label="Optional comment"
+        placeholder="Optional — explain why (helps the agent learn)"
+        maxlength="4000"
+        .value=${this._comment}
+        @input=${(e: Event) =>
+          (this._comment = (e.target as HTMLTextAreaElement).value)}
+      ></textarea>
+
+      <div class="actions">
+        <button
+          type="button"
+          class="cancel"
+          ?disabled=${this._state === "submitting"}
+          @click=${this._dismiss}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="submit"
+          ?disabled=${submitDisabled}
+          @click=${this._submit}
+        >
+          ${this._state === "submitting" ? "Submitting..." : "Submit feedback"}
+        </button>
+      </div>
+    `;
+  }
+
+  private _renderSuccess() {
+    return html`
+      <header class="modal-head">
+        <h3>Feedback recorded</h3>
+        <button
+          type="button"
+          class="close-icon"
+          aria-label="Close"
+          title="Close"
+          @click=${this._dismiss}
+        >
+          ✕
+        </button>
+      </header>
+      <p role="status" class="success">Thanks — your feedback was recorded.</p>
+      <div class="actions">
+        <button type="button" class="submit" @click=${this._dismiss}>Close</button>
+      </div>
+    `;
+  }
+
+  private _renderError() {
+    // Lit auto-encodes the template-literal interpolation — _errorMessage
+    // renders as text, NEVER as HTML (AC9 XSS-defence contract).
+    return html`<p role="alert" class="error">${this._errorMessage}</p>`;
+  }
+
+  private _dismiss = () => {
+    // Cancel any in-flight submission before closing.
+    this._abortController?.abort();
+    // UmbModalBaseElement provides _rejectModal() / _submitModal() — either
+    // closes the modal frame. We use _rejectModal because we're not emitting
+    // a return value (feedback was fire-and-go via POST already if we're in
+    // success state; cancel is the user's choice if we're in idle/error).
+    this._rejectModal();
+  };
+
+  private _selectScore(score: ScoreString) {
+    this._score = score;
+    // Clear any prior error state when the editor picks a different score.
+    if (this._state === "error") {
+      this._state = "idle";
+      this._errorMessage = "";
+    }
+  }
+
+  private async _submit() {
+    const runId = this.data?.runId ?? "";
+    if (!this._score || runId.length === 0) {
+      this._state = "error";
+      this._errorMessage =
+        "Couldn't authenticate your backoffice session. Refresh the page and try again.";
+      return;
+    }
+
+    // Cancel any prior in-flight submission (resubmit / retry path).
+    this._abortController?.abort();
+    this._abortController = new AbortController();
+    this._state = "submitting";
+    this._errorMessage = "";
+
+    try {
+      const response = await authenticatedFetch(
+        () => this.getContext(UMB_AUTH_CONTEXT),
+        "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
+        {
+          method: "POST",
+          body: {
+            runId,
+            score: this._score,
+            comment: this._comment.length > 0 ? this._comment : null,
+          },
+          signal: this._abortController.signal,
+        },
+      );
+      if (response.ok) {
+        this._state = "success";
+        return;
+      }
+      await this._handleHttpError(response);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Silent — user navigated away mid-submit. Don't surface an error.
+        return;
+      }
+      if (err instanceof AuthContextUnavailableError) {
+        this._state = "error";
+        this._errorMessage =
+          "Couldn't authenticate your backoffice session. Refresh the page and try again.";
+        return;
+      }
+      this._state = "error";
+      this._errorMessage =
+        "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
+    }
+  }
+
+  private async _handleHttpError(response: Response) {
+    if (response.status === 401) {
+      this._state = "error";
+      this._errorMessage =
+        "Couldn't authenticate your backoffice session. Refresh the page and try again.";
+      return;
+    }
+    if (response.status === 404) {
+      // Story 2.3 Task 0.6 — controller returns 404 when the AIAuditLog row
+      // for this runId/ThreadId isn't yet visible to IAgentRunReader. Two
+      // benign causes: (a) the agent run hasn't finished writing its audit-
+      // log row yet (microsecond race window), OR (b) upstream Fork (i)
+      // metadata propagation isn't deployed on this host. Either way, the
+      // editor's recovery action is the same: wait + retry.
+      this._state = "error";
+      this._errorMessage =
+        "This run hasn't been audit-logged yet. Wait a moment and try again — or refresh the page if it keeps failing.";
+      return;
+    }
+    if (response.status === 400) {
+      // Two response shapes per Story 2.2 DRIFT-2.2-impl-5:
+      //   (a) our ProblemDetails  →  `{ detail: "..." }`
+      //   (b) framework ModelState →  `{ errors: { "$.field": ["..."] } }`
+      try {
+        const body = await response.json();
+        if (typeof body?.detail === "string" && body.detail.length > 0) {
+          this._state = "error";
+          this._errorMessage = body.detail;
+          return;
+        }
+        if (body?.errors && typeof body.errors === "object") {
+          const firstFieldErrors = Object.values(body.errors)[0];
+          if (
+            Array.isArray(firstFieldErrors) &&
+            typeof firstFieldErrors[0] === "string"
+          ) {
+            this._state = "error";
+            this._errorMessage = firstFieldErrors[0];
+            return;
+          }
+        }
+      } catch {
+        // Body parse failure — fall through to generic.
+      }
+    }
+    this._state = "error";
+    this._errorMessage =
+      "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
+  }
+
+  static override styles = css`
     :host {
       display: block;
-      padding: var(--uui-size-space-3, 0.75rem);
-      border: 1px solid var(--uui-color-border, #ccc);
-      border-radius: var(--uui-border-radius, 4px);
+      padding: var(--uui-size-space-5, 1.5rem);
+      max-width: 540px;
+      margin: 0 auto;
+      font-family: var(--uui-font-family, system-ui, sans-serif);
+      color: var(--uui-color-text, #1a1a1a);
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--uui-size-space-3, 0.75rem);
+      margin-bottom: var(--uui-size-space-3, 0.75rem);
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+
+    .close-icon {
+      padding: 0.25rem 0.5rem;
+      font-size: 1.1rem;
+      line-height: 1;
+      background: transparent;
+      border: 1px solid transparent;
+    }
+
+    .close-icon:hover {
+      background: var(--uui-color-surface-alt, #f0f0f0);
+      border-color: var(--uui-color-border, #c0c0c0);
+    }
+
+    .actions {
+      display: flex;
+      gap: var(--uui-size-space-2, 0.5rem);
+      justify-content: flex-end;
+      margin-top: var(--uui-size-space-3, 0.75rem);
+    }
+
+    .cancel {
+      background: var(--uui-color-surface, #ffffff);
+      color: inherit;
     }
 
     .row {
       display: flex;
       gap: var(--uui-size-space-2, 0.5rem);
-      align-items: center;
+      margin-bottom: var(--uui-size-space-3, 0.75rem);
     }
 
     button {
       cursor: pointer;
-      padding: var(--uui-size-space-2, 0.5rem) var(--uui-size-space-3, 0.75rem);
+      font: inherit;
+      padding: var(--uui-size-space-2, 0.5rem) var(--uui-size-space-4, 1rem);
+      border: 1px solid var(--uui-color-border, #c0c0c0);
+      background: var(--uui-color-surface, #ffffff);
+      color: inherit;
+      border-radius: var(--uui-border-radius, 4px);
+      transition: background-color 0.12s ease, border-color 0.12s ease;
     }
 
-    button.active {
+    button:hover:not(:disabled) {
+      background: var(--uui-color-surface-alt, #f0f0f0);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--uui-color-focus, #3544b1);
+      outline-offset: 2px;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .thumb.active {
       background: var(--uui-color-selected, #3544b1);
-      color: white;
+      border-color: var(--uui-color-selected, #3544b1);
+      color: var(--uui-color-selected-contrast, #ffffff);
     }
 
     textarea {
+      display: block;
       width: 100%;
-      min-height: 4rem;
-      margin-top: var(--uui-size-space-2, 0.5rem);
+      min-height: 5rem;
+      padding: var(--uui-size-space-2, 0.5rem);
+      margin-bottom: var(--uui-size-space-3, 0.75rem);
+      font: inherit;
+      border: 1px solid var(--uui-color-border, #c0c0c0);
+      border-radius: var(--uui-border-radius, 4px);
+      box-sizing: border-box;
+      resize: vertical;
+    }
+
+    textarea:focus-visible {
+      outline: 2px solid var(--uui-color-focus, #3544b1);
+      outline-offset: 2px;
+    }
+
+    textarea[hidden] {
+      display: none;
+    }
+
+    .submit {
+      background: var(--uui-color-positive, #1c7430);
+      color: var(--uui-color-positive-contrast, #ffffff);
+      border-color: var(--uui-color-positive, #1c7430);
+    }
+
+    .submit:hover:not(:disabled) {
+      background: var(--uui-color-positive-emphasis, #155724);
+      border-color: var(--uui-color-positive-emphasis, #155724);
+    }
+
+    .success {
+      padding: var(--uui-size-space-3, 0.75rem);
+      background: var(--uui-color-positive-standalone, #d4edda);
+      color: var(--uui-color-positive-standalone-contrast, #155724);
+      border-radius: var(--uui-border-radius, 4px);
+      margin: 0;
+    }
+
+    .error {
+      padding: var(--uui-size-space-3, 0.75rem);
+      background: var(--uui-color-danger-standalone, #f8d7da);
+      color: var(--uui-color-danger-standalone-contrast, #721c24);
+      border-radius: var(--uui-border-radius, 4px);
+      margin: var(--uui-size-space-3, 0.75rem) 0 0;
     }
   `;
-
-  render() {
-    if (this._submitted) {
-      return html`<p>Thanks — feedback recorded.</p>`;
-    }
-
-    return html`
-      <div class="row">
-        <button
-          class=${this._score === "up" ? "active" : ""}
-          @click=${() => (this._score = "up")}
-          aria-label="Thumbs up"
-        >
-          👍
-        </button>
-        <button
-          class=${this._score === "down" ? "active" : ""}
-          @click=${() => (this._score = "down")}
-          aria-label="Thumbs down"
-        >
-          👎
-        </button>
-        <span>How was this output?</span>
-      </div>
-      <textarea
-        placeholder="Optional: explain why (helps the agent learn)"
-        .value=${this._comment}
-        @input=${(e: Event) =>
-          (this._comment = (e.target as HTMLTextAreaElement).value)}
-      ></textarea>
-      <button @click=${this._submit} ?disabled=${this._score === null}>
-        Submit feedback
-      </button>
-    `;
-  }
-
-  private async _submit() {
-    if (!this._score || !this.runId) {
-      return;
-    }
-    // Week 2: replace with real API call.
-    // await fetch(`/umbraco/cogworks-agent-memory/api/v1/feedback`, { ... })
-    this._submitted = true;
-  }
 }
 
 declare global {

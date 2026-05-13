@@ -29,6 +29,13 @@ internal sealed class AgentRunReader : IAgentRunReader
     // (DRIFT-NEW-5: 3-of-4 call paths produce null Metadata in v0.1).
     private const int MaxAuditLogPageSize = 200;
 
+    // GetRunsForThreadAsync paging cap — upstream AIAuditLogFilter has no ThreadId
+    // filter, so we read pages and filter in-memory. 10 pages × 200 = 2000 rows
+    // covers a busy host's MaxMemoryAgeDays window with comfortable headroom for
+    // the v0.1 demo + brand-audit feedback flow. Cap exists to bound IO; loud
+    // log breadcrumb if hit so ops can re-tune.
+    private const int MaxAuditLogPagesForThreadLookup = 10;
+
     // Joined-snapshot separator per architecture v1 § Run reading + 0-c §
     // Synthesis findings table (line 228).
     private const string SnapshotJoinSeparator = "\n\n---\n\n";
@@ -73,7 +80,8 @@ internal sealed class AgentRunReader : IAgentRunReader
                 .Where(r => r.Metadata is not null
                             && r.Metadata.TryGetValue(RunIdMetadataKey, out var keyValue)
                             && keyValue == runId
-                            && r.FeatureId.HasValue)
+                            && r.FeatureId.HasValue
+                            && r.FeatureId.Value != Guid.Empty)
                 .ToList();
 
             if (matching.Count == 0)
@@ -91,6 +99,89 @@ internal sealed class AgentRunReader : IAgentRunReader
                 nameof(GetRunAsync),
                 runId);
             return null;
+        }
+    }
+
+    public async Task<IReadOnlyList<AgentRunRecord>> GetRunsForThreadAsync(
+        string threadId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            return Array.Empty<AgentRunRecord>();
+        }
+
+        try
+        {
+            var filter = new AIAuditLogFilter
+            {
+                FromDate = DateTime.UtcNow.AddDays(-_options.Value.MaxMemoryAgeDays),
+                FeatureType = AgentFeatureType,
+                // No FeatureId — GetRunsForThreadAsync is ThreadId-keyed, not agent-keyed.
+            };
+
+            // Upstream AIAuditLogFilter has no ThreadId predicate, so we page through
+            // the FeatureType-scoped result and in-memory-filter on Metadata. Cap at
+            // MaxAuditLogPagesForThreadLookup to bound IO; loud-log if hit so ops can
+            // tune MaxMemoryAgeDays or escalate to an upstream filter-API request.
+            var aggregated = new List<AIAuditLog>();
+            for (var page = 0; page < MaxAuditLogPagesForThreadLookup; page++)
+            {
+                var (rows, _) = await _auditLogService.GetAuditLogsPagedAsync(
+                    filter,
+                    skip: page * MaxAuditLogPageSize,
+                    take: MaxAuditLogPageSize,
+                    ct: cancellationToken);
+                var rowsList = rows.ToList();
+                aggregated.AddRange(rowsList);
+                if (rowsList.Count < MaxAuditLogPageSize)
+                {
+                    break;
+                }
+                if (page == MaxAuditLogPagesForThreadLookup - 1)
+                {
+                    _logger.LogWarning(
+                        "GetRunsForThreadAsync hit the page-scan cap ({Cap} pages × {PageSize}) for ThreadId={ThreadId}. Older audit rows beyond {MaxRows} were not scanned; consider lowering MaxMemoryAgeDays or requesting an upstream ThreadId filter.",
+                        MaxAuditLogPagesForThreadLookup,
+                        MaxAuditLogPageSize,
+                        threadId,
+                        MaxAuditLogPagesForThreadLookup * MaxAuditLogPageSize);
+                }
+            }
+
+            // Filter to rows carrying the matching ThreadId metadata + a RunId we can group by
+            // + a non-empty agent FeatureId. Pre-Fork-(i) rows (Metadata = null on
+            // Automate-driven runs in v1.9.0 builds without Adam's PR-Upstream-N patch) drop
+            // out at this filter — they're not visible to thread-keyed lookups, same as the
+            // RunId-keyed methods.
+            var matching = aggregated
+                .Where(r => r.Metadata is not null
+                            && r.Metadata.TryGetValue(ThreadIdMetadataKey, out var rowThreadId)
+                            && rowThreadId == threadId
+                            && r.Metadata.TryGetValue(RunIdMetadataKey, out var keyValue)
+                            && !string.IsNullOrEmpty(keyValue)
+                            && r.FeatureId.HasValue
+                            && r.FeatureId.Value != Guid.Empty)
+                .GroupBy(r => r.Metadata![RunIdMetadataKey])
+                .Select(g => ProjectGroupToRecord(g.Key, g))
+                // ThenByDescending(RunId) pins a deterministic ordering when multiple
+                // groups share an identical StartedUtc (clock-granularity collisions).
+                // The controller picks records.First().AgentId, so determinism here
+                // matters for feedback attribution reproducibility.
+                .OrderByDescending(r => r.StartedUtc)
+                .ThenByDescending(r => r.RunId, StringComparer.Ordinal)
+                .ToList();
+
+            return matching;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to read audit log for {Operation} threadId={ThreadId}",
+                nameof(GetRunsForThreadAsync),
+                threadId);
+            return Array.Empty<AgentRunRecord>();
         }
     }
 

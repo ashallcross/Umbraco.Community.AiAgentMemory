@@ -261,6 +261,119 @@ public class AgentRunReaderTests
         Assert.That(result, Is.Null);
     }
 
+    // ---------- GetRunsForThreadAsync (Story 2.3 Task 0.5) ----------
+
+    [Test]
+    public async Task GetRunsForThreadAsync_HappyPath_ReturnsAllRowsMatchingThreadId_GroupedByRunId()
+    {
+        // Two RunIds × 1 row each, both sharing the same ThreadId — models
+        // a 2-step workflow run where each Run AI Agent step produces its
+        // own (RunId, shared-ThreadId) tuple per Adam's PR-Upstream-N design.
+        var (sut, svc, _) = CreateSutWithLogger();
+        var rows = new[]
+        {
+            Row(runIdValue: "rid-step-1", threadIdValue: "tid-workflow", startTime: BaseUtc),
+            Row(runIdValue: "rid-step-2", threadIdValue: "tid-workflow", startTime: BaseUtc.AddMinutes(1)),
+            Row(runIdValue: "rid-other", threadIdValue: "tid-different-workflow", startTime: BaseUtc.AddMinutes(2)),
+        };
+        ReturnsRows(svc, rows);
+
+        var result = await sut.GetRunsForThreadAsync("tid-workflow", CancellationToken.None);
+
+        Assert.That(result, Has.Count.EqualTo(2));
+        // Ordered by StartedUtc DESC — step-2 first.
+        Assert.That(result[0].RunId, Is.EqualTo("rid-step-2"));
+        Assert.That(result[1].RunId, Is.EqualTo("rid-step-1"));
+        // Both records carry the shared ThreadId.
+        Assert.That(result[0].ThreadId, Is.EqualTo("tid-workflow"));
+        Assert.That(result[1].ThreadId, Is.EqualTo("tid-workflow"));
+    }
+
+    [Test]
+    public async Task GetRunsForThreadAsync_FiltersForeignThreadIds_AndRowsWithNullMetadata()
+    {
+        // Three foreign-thread rows + 1 null-metadata row + 1 matching row.
+        // Only the matching row should appear; foreign rows / pre-Fork-(i)
+        // null-Metadata rows are silently filtered out.
+        var (sut, svc, _) = CreateSutWithLogger();
+        var rows = new[]
+        {
+            Row(runIdValue: "rid-target", threadIdValue: "tid-match"),
+            Row(runIdValue: "rid-other-a", threadIdValue: "tid-foreign-a"),
+            Row(runIdValue: "rid-other-b", threadIdValue: "tid-foreign-b"),
+            Row(metadataNull: true),  // pre-Fork-(i) audit row, no Metadata
+            Row(runIdValue: "rid-other-c", threadIdValue: "tid-foreign-c"),
+        };
+        ReturnsRows(svc, rows);
+
+        var result = await sut.GetRunsForThreadAsync("tid-match", CancellationToken.None);
+
+        Assert.That(result, Has.Count.EqualTo(1));
+        Assert.That(result[0].RunId, Is.EqualTo("rid-target"));
+    }
+
+    [TestCase("")]
+    [TestCase(null)]
+    public async Task GetRunsForThreadAsync_NullOrEmptyThreadId_ReturnsEmptyList_WithoutHittingUpstream(string? threadId)
+    {
+        var (sut, svc, _) = CreateSutWithLogger();
+
+        var result = await sut.GetRunsForThreadAsync(threadId!, CancellationToken.None);
+
+        Assert.That(result, Is.Empty);
+        // Fast-fail short-circuits BEFORE any upstream IO.
+        await svc.DidNotReceiveWithAnyArgs().GetAuditLogsPagedAsync(default!, default, default, default);
+    }
+
+    [Test]
+    public async Task GetRunsForThreadAsync_AuditLogServiceThrows_ReturnsEmptyAndLogsWarning()
+    {
+        var auditLogService = Substitute.For<IAIAuditLogService>();
+        auditLogService.GetAuditLogsPagedAsync(
+                Arg.Any<AIAuditLogFilter>(),
+                Arg.Any<int>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns<Task<(IEnumerable<AIAuditLog>, int)>>(_ => throw new InvalidOperationException("boom"));
+        var logger = Substitute.For<ILogger<AgentRunReader>>();
+        var sut = new AgentRunReader(
+            auditLogService,
+            Options.Create(new AgentMemoryOptions()),
+            logger);
+
+        var result = await sut.GetRunsForThreadAsync("tid-any", CancellationToken.None);
+
+        Assert.That(result, Is.Empty);
+        logger.Received().Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<InvalidOperationException>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Test]
+    public void GetRunsForThreadAsync_AuditLogServiceCancels_RethrowsOperationCanceledException()
+    {
+        // Pins the `catch when (ex is not OperationCanceledException)` rethrow clause —
+        // a regression that drops the `when` filter would swallow cancellation and the
+        // NFR-R3 graceful-degradation contract would silently mask user-initiated cancels.
+        var auditLogService = Substitute.For<IAIAuditLogService>();
+        auditLogService.GetAuditLogsPagedAsync(
+                Arg.Any<AIAuditLogFilter>(),
+                Arg.Any<int>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns<Task<(IEnumerable<AIAuditLog>, int)>>(_ => throw new OperationCanceledException());
+        var sut = new AgentRunReader(
+            auditLogService,
+            Options.Create(new AgentMemoryOptions()),
+            Substitute.For<ILogger<AgentRunReader>>());
+
+        Assert.ThrowsAsync<OperationCanceledException>(
+            () => sut.GetRunsForThreadAsync("tid-any", CancellationToken.None));
+    }
+
     // ---------- NFR-R3 graceful degradation ----------
 
     [Test]

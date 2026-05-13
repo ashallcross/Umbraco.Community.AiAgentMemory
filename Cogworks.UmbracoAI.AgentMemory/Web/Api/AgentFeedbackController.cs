@@ -1,5 +1,6 @@
 using Asp.Versioning;
 using Cogworks.UmbracoAI.AgentMemory.Feedback;
+using Cogworks.UmbracoAI.AgentMemory.Runs;
 using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -50,6 +51,22 @@ namespace Cogworks.UmbracoAI.AgentMemory.Web.Api;
 /// <see cref="IBackOfficeSecurityAccessor"/>; the request body does NOT carry
 /// a <c>createdBy</c> field. A client cannot impersonate another user.
 /// </para>
+/// <para>
+/// <b>Agent identity (<c>AgentId</c>) is also resolved server-side</b> via
+/// <see cref="IAgentRunReader.GetRunsForThreadAsync"/> using the supplied
+/// <see cref="AgentFeedbackPostRequest.RunId"/> (= upstream
+/// <c>Metadata["Umbraco.AI.Agent.ThreadId"]</c> — the workflow-run-level
+/// conversation identifier surfaced by the editor's modal). Empirical Story
+/// 2.3 Task 0 spike disproved the original 4-field contract premise that the
+/// widget's mount surface could supply an agent id; the controller now
+/// derives it. Returns 404 when no audit-log rows match the supplied run id
+/// (e.g. the audit-log row hasn't been written yet, OR the upstream Fork (i)
+/// metadata propagation isn't deployed). v0.1 single-agent attribution
+/// assumption: when a workflow has multiple <c>RunAgentAction</c> steps with
+/// different agents, the first matched record's <c>AgentId</c> is used —
+/// Brand Voice Audit demo is single-agent so the assumption holds. Multi-
+/// agent disambiguation is a v0.2 candidate.
+/// </para>
 /// </remarks>
 [ApiVersion("1.0")]
 [VersionedApiBackOfficeRoute("cogworks-agent-memory/feedback")]
@@ -72,18 +89,22 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
 
     private readonly IAgentFeedbackService _feedbackService;
     private readonly IBackOfficeSecurityAccessor _securityAccessor;
+    private readonly IAgentRunReader _runReader;
     private readonly ILogger<AgentFeedbackController> _logger;
 
     public AgentFeedbackController(
         IAgentFeedbackService feedbackService,
         IBackOfficeSecurityAccessor securityAccessor,
+        IAgentRunReader runReader,
         ILogger<AgentFeedbackController> logger)
     {
         ArgumentNullException.ThrowIfNull(feedbackService);
         ArgumentNullException.ThrowIfNull(securityAccessor);
+        ArgumentNullException.ThrowIfNull(runReader);
         ArgumentNullException.ThrowIfNull(logger);
         _feedbackService = feedbackService;
         _securityAccessor = securityAccessor;
+        _runReader = runReader;
         _logger = logger;
     }
 
@@ -95,6 +116,7 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
     [Consumes("application/json")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> PostAsync(
         [FromBody] AgentFeedbackPostRequest? request,
         CancellationToken cancellationToken)
@@ -125,10 +147,28 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
                 statusCode: StatusCodes.Status401Unauthorized);
         }
 
-        // request and validation.IsInvalid have already been checked above.
+        // Story 2.3 Task 0.6 — modal hands us a thread-level run identifier, not an
+        // agent id. Resolve agentId server-side so the widget contract stays minimal
+        // (3 fields, no agent guessing on the client).
+        var runs = await _runReader.GetRunsForThreadAsync(request!.RunId, cancellationToken).ConfigureAwait(false);
+        if (runs.Count == 0)
+        {
+            _logger.LogWarning(
+                "AgentFeedbackController.PostAsync — IAgentRunReader.GetRunsForThreadAsync returned zero records for RunId={RunId}. Returning 404; the audit-log row may not yet be written, or upstream Metadata propagation (PR-Upstream-N / Fork (i)) is not deployed.",
+                request.RunId);
+            return Problem(
+                title: "Run not found.",
+                detail: $"No agent runs found for the supplied runId ('{request.RunId}'). The run may not yet be audit-logged, or the upstream Metadata propagation (PR-Upstream-N / Fork (i)) is not deployed on this host.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+        // v0.1 single-agent attribution assumption — Brand Voice Audit demo's
+        // workflow is single-agent (one Run AI Agent step). Multi-agent workflows
+        // surface a v0.2 disambiguation requirement (Story 5.x candidate).
+        var agentId = runs[0].AgentId;
+
         await _feedbackService.RecordFeedbackAsync(
-            request!.RunId,
-            request.AgentId,
+            request.RunId,
+            agentId,
             request.Score,
             request.Comment,
             resolvedKey.Value,
@@ -150,10 +190,6 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
         if (request.RunId.Length > RunIdMaxChars)
         {
             return (true, $"runId cannot exceed {RunIdMaxChars} characters (received {request.RunId.Length}).");
-        }
-        if (request.AgentId == Guid.Empty)
-        {
-            return (true, "agentId is required and cannot be Guid.Empty.");
         }
         if (!Enum.IsDefined<FeedbackScore>(request.Score))
         {

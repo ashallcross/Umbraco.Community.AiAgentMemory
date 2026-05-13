@@ -15,12 +15,40 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 2026-05-13 Story 2.3 Task 6 — Adam's local Umbraco.AI fork at commit gc1456d0
+         was built against EF Core 10.0.7; nuspec floor unstated, NuGet would resolve
+         10.0.4 and runtime-fail with FileNotFoundException on the strong-named
+         10.0.7.0 assembly. Explicit floor pin lives in Directory.Packages.props;
+         PackageReference here makes the dependency surface at the TestSite csproj
+         level (host-only). DRIFT-2.3-impl-3. When the fork's nuspec gap is fixed
+         upstream, this PackageReference can drop. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Umbraco.AI stack — required to test agent memory end-to-end -->
     <PackageReference Include="Umbraco.AI" />
     <PackageReference Include="Umbraco.AI.Agent" />
     <PackageReference Include="Umbraco.AI.Agent.Copilot" />
     <PackageReference Include="Umbraco.AI.Anthropic" />
     <PackageReference Include="Umbraco.AI.OpenAI" />
+    <!-- 2026-05-13 Story 2.3 Task 6 — explicit reference to the M.E.AI.OpenAI
+         adapter so the central-package-management pin (Directory.Packages.props
+         10.5.2) wins over the transitive 10.3.0 floor that Umbraco.AI.OpenAI 1.2.0
+         pulls. Without this, Copilot's tool-call path throws MissingMethodException
+         on the removed `HostedMcpServerTool.AuthorizationToken` getter. -->
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 2026-05-13 Story 2.3 Task 6 — Umbraco.Automate (workflow runtime) + the
+         AI.Automate action-pack the keynote demo runs against. Both come from
+         Adam's local fork at commit gc1456d0 (same Fork (i) PR). Required for
+         the widget's Strategy B modal-replacement (Ua.Modal.RunDetail) to have
+         a real target. Versions pinned in Directory.Packages.props. -->
+    <PackageReference Include="Umbraco.Automate" />
+    <PackageReference Include="Umbraco.AI.Automate" />
   </ItemGroup>
 
   <ItemGroup>

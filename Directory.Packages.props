@@ -18,22 +18,58 @@
          versions match the runtime cascade NuGet resolves anyway. Closes
          DRIFT-NEW-4 + DRIFT-5 + DRIFT-0D-1 simultaneously at source. Replaces
          Path A's seven explicit transitive pins with two façade pins.
-         See 06-architecture-v1.md § Pinned versions Path B + AR28 reconciliation. -->
-    <PackageVersion Include="Umbraco.AI" Version="1.10.0" />
-    <PackageVersion Include="Umbraco.AI.Agent" Version="1.9.0" />
+         See 06-architecture-v1.md § Pinned versions Path B + AR28 reconciliation.
+
+         2026-05-13 Story 2.3 Task 6 — bumped to Adam's local fork. Initially at
+         commit gc1456d0 (Fork (i) Metadata propagation patch). Re-packed at
+         commit gad0117f same day to include the OpenAI + Anthropic provider
+         rebuilds against the bumped M.E.AI 10.5.2 surface that landed on dev
+         pre-PR (dev commit cdda9e3b, not gc1456d0). All 20 nupkgs in the local
+         fork artifacts folder now share suffix gad0117f. Local-fork source wired
+         via TestSite/NuGet.Config. When the providers re-publish to the public
+         nightly feed after the next dev release-cut, these pins can drop to the
+         then-published prerelease version strings. -->
+    <PackageVersion Include="Umbraco.AI" Version="1.10.2--preview.13.gad0117f" />
+    <PackageVersion Include="Umbraco.AI.Agent" Version="1.9.1--preview.49.gad0117f" />
     <PackageVersion Include="Umbraco.AI.Agent.Copilot" Version="1.0.0-alpha6" />
-    <PackageVersion Include="Umbraco.AI.Anthropic" Version="1.3.0" />
-    <PackageVersion Include="Umbraco.AI.OpenAI" Version="1.2.0" />
+    <PackageVersion Include="Umbraco.AI.Anthropic" Version="1.3.1--preview.118.gad0117f" />
+    <PackageVersion Include="Umbraco.AI.OpenAI" Version="1.2.1--preview.118.gad0117f" />
+
+    <!-- 2026-05-13 Story 2.3 Task 6 — Umbraco.Automate runtime + the AI.Automate
+         action-pack the keynote demo runs against. Both come from Adam's local fork
+         at commit gc1456d0 (the same Fork (i) PR that fixed AI.Agent.Metadata).
+         When the PR lands upstream, Umbraco.Automate floats back to the public
+         nightly feed (preview.374+) and AI.Automate floats to nuget.org. -->
+    <PackageVersion Include="Umbraco.Automate" Version="0.1.0--preview.374.g65a8eb6" />
+    <PackageVersion Include="Umbraco.AI.Automate" Version="1.0.0--alpha1.preview.113.gad0117f" />
+
+    <!-- 2026-05-13 Story 2.3 Task 6 — explicit EF Core floor pin. The fork's
+         Persistence assemblies were compiled against EF Core 10.0.7; their nuspecs
+         don't declare a floor, so NuGet would otherwise resolve 10.0.4 (Umbraco.Cms
+         17.3.2's lower bound) and runtime-fail with FileNotFoundException on the
+         strong-named 10.0.7.0 assembly. Story 2.3 § DRIFT-2.3-impl-3.
+         When the fork's nuspec gap is fixed upstream, this explicit pin can drop. -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.7" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.7" />
     <!-- Umbraco.AI.Search pinned to 1.0.0-beta3 prerelease per AR19 + NFR-C3.
          Must NOT float — coordinated patch release required to bump.
          Active reference begins in Story 3.1 (background indexer); pin landed in
          Story 0.B (alias-mechanics spike) to lock the lockfile cross-reference. -->
     <PackageVersion Include="Umbraco.AI.Search" Version="1.0.0-beta3" />
 
-    <!-- Microsoft.Extensions.AI primitives (transitive via Umbraco.AI 1.8.0 → 10.2.0).
+    <!-- Microsoft.Extensions.AI primitives (transitive via Umbraco.AI).
          Pinned at the lower bound Umbraco.AI requires; bumping when Umbraco.AI bumps
-         keeps DelegatingChatClient / IChatClient surface compatible with both. -->
-    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.3.0" />
+         keeps DelegatingChatClient / IChatClient surface compatible with both.
+         2026-05-13 Story 2.3 Task 6 — bumped 10.3.0 → 10.5.2 to satisfy Adam's local
+         fork's Umbraco.AI.Core 1.10.2 transitive lower bound. Drops back to whatever
+         floor the upstream PR settles on when it lands. -->
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.5.2" />
+
+    <!-- 2026-05-13 Story 2.3 Task 6 — Microsoft.Extensions.AI.OpenAI pin retained
+         at 10.5.2 (matches the new Umbraco.AI.OpenAI 1.2.1-preview.118.gad0117f
+         floor of [10.5.2, 10.999.999)). The temporary 10.3.0 workaround dropped
+         once Adam's fork dev repacked the provider line at commit gad0117f. -->
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.5.2" />
 
     <!-- TestSite theme (Cogworks Clean Starter): meta-package "Clean" drives demo content via
          a package migration; "Clean.Core" is the components library it depends on. Pinned in

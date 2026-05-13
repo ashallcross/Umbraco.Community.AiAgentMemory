@@ -83,4 +83,43 @@ public interface IAgentRunReader
         Guid agentId,
         int take,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns all <see cref="AgentRunRecord"/>s that share the supplied
+    /// <paramref name="threadId"/> — i.e. all chat-call rows whose
+    /// <c>Metadata["Umbraco.AI.Agent.ThreadId"] == threadId</c>. One Automate workflow run
+    /// produces one <c>ThreadId</c> shared across every <c>RunAgentAction.ExecuteAsync</c>
+    /// invocation in that workflow; each <c>ExecuteAsync</c> in turn produces a distinct
+    /// <c>RunId</c>-group worth of rows. The result is grouped by <c>RunId</c> internally
+    /// — one <see cref="AgentRunRecord"/> per <c>ExecuteAsync</c> invocation, ordered by
+    /// <c>StartedUtc</c> descending.
+    /// </summary>
+    /// <remarks>
+    /// Story 2.3 / Task 0.5 — bridge for the editor feedback widget. The widget receives
+    /// <c>modalContext.data.runId</c> from Automate's <c>Ua.Modal.RunDetail</c> modal; that
+    /// value is semantically a <c>ThreadId</c> (workflow-run-level identifier). The
+    /// controller (Story 2.2 amended in Task 0.6) calls this method to resolve
+    /// <c>agentId</c> server-side from the supplied thread id — the widget never sees the
+    /// agent id, never has to provide it.
+    /// <para>
+    /// Returns an empty list (not an exception) when no rows match OR when the
+    /// <see cref="Umbraco.AI.Core.AuditLog.IAIAuditLogService"/> dependency throws —
+    /// graceful degradation per NFR-R3. Fast-fails to empty list on null/empty
+    /// <paramref name="threadId"/>. Pre-Fork-(i) rows (<c>Metadata = null</c> on
+    /// Automate-driven runs in v1.9.0 builds without Adam's PR-Upstream-N patch) do NOT
+    /// match this filter — they're filtered out by the same GROUP BY contract as
+    /// <see cref="GetRunAsync"/>.
+    /// </para>
+    /// <para>
+    /// <b>v0.1 single-agent assumption (Story 2.3 Task 0.6 caveat):</b> when multiple
+    /// <c>RunAgentAction</c> steps within one workflow run use different agents, the
+    /// returned records carry distinct <c>AgentId</c> values. The controller picks
+    /// <c>records.First().AgentId</c> for feedback attribution — sound for the
+    /// Brand Voice Audit demo (single-agent) but surfaces a v0.2 disambiguation
+    /// requirement for multi-agent workflows.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<AgentRunRecord>> GetRunsForThreadAsync(
+        string threadId,
+        CancellationToken cancellationToken);
 }

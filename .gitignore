@@ -106,3 +106,7 @@ appsettings.*.Local.json
 *.sqlite.db-journal
 *.sqlite.db-wal
 *.sqlite.db-shm
+
+# Story 2.3 Task 6 — local-machine NuGet override pointing at Adam's local Umbraco.AI fork.
+# NOT shipped (the local-fork source path is adam-specific).
+/NuGet.Config
