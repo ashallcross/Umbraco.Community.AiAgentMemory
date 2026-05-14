@@ -48,6 +48,43 @@ let i = class extends f {
       this._abortController?.abort(), this._rejectModal();
     }, this._onCommentInput = (t) => {
       this._comment = t.target.value;
+    }, this._submit = async () => {
+      if (!this._score)
+        return;
+      const t = this.data?.runId ?? "";
+      if (t.length === 0) {
+        this._state = "error", this._errorMessage = "Couldn't load this run's details. Refresh the page and try again.";
+        return;
+      }
+      this._abortController?.abort(), this._abortController = new AbortController(), this._state = "submitting", this._errorMessage = "";
+      try {
+        const e = await k(
+          () => this.getContext(y),
+          "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
+          {
+            method: "POST",
+            body: {
+              runId: t,
+              score: this._score,
+              comment: this._comment.length > 0 ? this._comment : null
+            },
+            signal: this._abortController.signal
+          }
+        );
+        if (e.ok) {
+          this._state = "success";
+          return;
+        }
+        await this._handleHttpError(e);
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError")
+          return;
+        if (e instanceof c) {
+          this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
+          return;
+        }
+        this._state = "error", this._errorMessage = "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
+      }
     };
   }
   connectedCallback() {
@@ -144,42 +181,6 @@ let i = class extends f {
   _selectScore(t) {
     this._score = t, this._state === "error" && (this._state = "idle", this._errorMessage = "");
   }
-  async _submit() {
-    const t = this.data?.runId ?? "";
-    if (!this._score || t.length === 0) {
-      this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
-      return;
-    }
-    this._abortController?.abort(), this._abortController = new AbortController(), this._state = "submitting", this._errorMessage = "";
-    try {
-      const e = await k(
-        () => this.getContext(y),
-        "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
-        {
-          method: "POST",
-          body: {
-            runId: t,
-            score: this._score,
-            comment: this._comment.length > 0 ? this._comment : null
-          },
-          signal: this._abortController.signal
-        }
-      );
-      if (e.ok) {
-        this._state = "success";
-        return;
-      }
-      await this._handleHttpError(e);
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError")
-        return;
-      if (e instanceof c) {
-        this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
-        return;
-      }
-      this._state = "error", this._errorMessage = "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
-    }
-  }
   async _handleHttpError(t) {
     if (t.status === 401) {
       this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
@@ -189,7 +190,7 @@ let i = class extends f {
       this._state = "error", this._errorMessage = "This run hasn't been audit-logged yet. Wait a moment and try again — or refresh the page if it keeps failing.";
       return;
     }
-    if (t.status === 400)
+    if (t.status === 400) {
       try {
         const e = await t.json();
         if (typeof e?.detail == "string" && e.detail.length > 0) {
@@ -205,6 +206,9 @@ let i = class extends f {
         }
       } catch {
       }
+      this._state = "error", this._errorMessage = "Your submission was rejected. Refresh and try again — if it keeps failing, the run may no longer accept feedback.";
+      return;
+    }
     this._state = "error", this._errorMessage = "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
   }
 };
@@ -276,7 +280,7 @@ u([
 i = u([
   _("cogworks-agent-feedback")
 ], i);
-const $ = [
+const T = [
   {
     type: "modal",
     alias: "Ua.Modal.RunDetail",
@@ -286,6 +290,6 @@ const $ = [
   }
 ];
 export {
-  $ as manifests
+  T as manifests
 };
 //# sourceMappingURL=cogworks-umbracoai-agentmemory.js.map

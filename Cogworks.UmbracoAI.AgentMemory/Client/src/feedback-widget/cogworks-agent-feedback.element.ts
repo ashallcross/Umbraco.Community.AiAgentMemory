@@ -209,12 +209,20 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     }
   }
 
-  private async _submit() {
+  private _submit = async () => {
+    if (!this._score) {
+      // Defensive — submit is disabled until a thumb is selected. Acts as a
+      // type-narrowing guard for the POST body construction below.
+      return;
+    }
     const runId = this.data?.runId ?? "";
-    if (!this._score || runId.length === 0) {
+    if (runId.length === 0) {
+      // Bellissima/Strategy-B contract violation: the modal opened without a
+      // runId in its data payload. Distinct copy from the auth-error branch so
+      // the editor's next step is "reload the page", not "re-login".
       this._state = "error";
       this._errorMessage =
-        "Couldn't authenticate your backoffice session. Refresh the page and try again.";
+        "Couldn't load this run's details. Refresh the page and try again.";
       return;
     }
 
@@ -258,7 +266,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       this._errorMessage =
         "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
     }
-  }
+  };
 
   private async _handleHttpError(response: Response) {
     if (response.status === 401) {
@@ -302,8 +310,16 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
           }
         }
       } catch {
-        // Body parse failure — fall through to generic.
+        // Body parse failure — fall through to the 400-specific generic below.
       }
+      // 400 reached but the body matched neither ProblemDetails nor ModelState.
+      // Validation failure of unknown shape — surface as "your input was rejected"
+      // not "server hiccup, try again" so the editor's next step is to review
+      // their input, not to retry the same submission.
+      this._state = "error";
+      this._errorMessage =
+        "Your submission was rejected. Refresh and try again — if it keeps failing, the run may no longer accept feedback.";
+      return;
     }
     this._state = "error";
     this._errorMessage =
