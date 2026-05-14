@@ -66,8 +66,13 @@ public sealed class MemoryInjectionMiddleware : DelegatingChatClient
     {
         var list = messages.ToList();
 
+        // workspaceId is v0.1-null per Story 3.1 Locked decision #9 (FR33/FR34/FR36
+        // v0.2 candidate). Story 3.3 owns the eventual real workspaceId source
+        // (FR22 + AR24 partially-open path); Story 3.2 ships this compile-fix-only
+        // placeholder so the IMemoryRetriever signature amendment doesn't break the build.
         var memories = await _retriever.RetrieveSimilarAsync(
             _agentId,
+            workspaceId: null,
             list,
             _options.TopKMemories,
             cancellationToken).ConfigureAwait(false);
@@ -100,7 +105,11 @@ public sealed class MemoryInjectionMiddleware : DelegatingChatClient
                 : $" — \"{memory.FeedbackComment}\"";
 
             sb.Append("• Run ");
-            sb.Append(memory.RunId.ToString("N").AsSpan(0, 8));
+            // MemoryEntry.RunId is string (post Story 3.2 DRIFT-3.2-1 — was Guid;
+            // semantically holds the upstream ThreadId per project-context § Schema
+            // RunId Column). Defensive Math.Min handles the edge case of <8-char
+            // strings (theoretically possible if a non-GUID RunId ever lands).
+            sb.Append(memory.RunId.AsSpan(0, Math.Min(8, memory.RunId.Length)));
             sb.Append(' ');
             sb.Append(marker);
             sb.Append(": ");

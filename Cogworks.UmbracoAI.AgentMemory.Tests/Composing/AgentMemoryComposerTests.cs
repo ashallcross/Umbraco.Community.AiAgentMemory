@@ -420,6 +420,74 @@ public class AgentMemoryComposerStartupValidationTests
             "IMemoryEntryRepository must be registered exactly once under repeated Compose() calls.");
     }
 
+    [Test]
+    public void Compose_StartupValidation_SemanticMemoryRetriever_NoCaptiveDependency()
+    {
+        // Story 3.2 AC7 — IMemoryRetriever → SemanticMemoryRetriever at Singleton
+        // lifetime; the Singleton consumes IServiceScopeFactory + framework
+        // singletons only. The retriever's per-call IServiceScope is the
+        // canonical Microsoft pattern for Singleton-services-consuming-Scoped
+        // — captive-dep risk is structurally zero. Mirrors the Story 3.1
+        // FeedbackIndexer test verbatim.
+        var (builder, services) = CreateBuilder();
+
+        new AgentMemoryComposer().Compose(builder);
+
+        var retrieverDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IMemoryRetriever));
+        Assert.That(retrieverDescriptor, Is.Not.Null, "IMemoryRetriever must be registered");
+        Assert.That(retrieverDescriptor!.Lifetime, Is.EqualTo(ServiceLifetime.Singleton),
+            "IMemoryRetriever must be Singleton — the retriever creates per-call scopes "
+            + "via IServiceScopeFactory.CreateScope(); a Scoped lifetime would conflict with "
+            + "Story 3.3's middleware composition (chat-client pipeline binds the retriever "
+            + "at agent-pipeline-construction time, before the chat-call scope exists).");
+        Assert.That(retrieverDescriptor.ImplementationType, Is.EqualTo(typeof(SemanticMemoryRetriever)),
+            "Story 3.2 replaces the Story 1.3 NullMemoryRetriever placeholder with SemanticMemoryRetriever.");
+
+        // SemanticMemoryRetriever's ctor deps: framework singletons + our options
+        // monitor + TimeProvider — NO direct upstream Umbraco.AI surface, NO
+        // direct Scoped package dep. Mirrors the Story 3.1 FeedbackIndexer
+        // assertion shape verbatim. Captive-dep risk structurally zero regardless
+        // of upstream lifetimes (resolved per-call inside RetrieveSimilarAsync).
+        var ctorParams = typeof(SemanticMemoryRetriever).GetConstructors()
+            .Single()
+            .GetParameters();
+        Assert.That(ctorParams, Has.None.Matches<System.Reflection.ParameterInfo>(p =>
+            p.ParameterType == typeof(IMemoryEntryRepository)
+            || p.ParameterType == typeof(IAgentFeedbackService)
+            || p.ParameterType == typeof(Umbraco.AI.Search.Core.VectorStore.IAIVectorStore)
+            || p.ParameterType == typeof(Umbraco.AI.Core.Embeddings.IAIEmbeddingService)
+            || p.ParameterType == typeof(Umbraco.AI.Core.Profiles.IAIProfileService)
+            || (p.ParameterType.IsGenericType
+                && p.ParameterType.GetGenericTypeDefinition() == typeof(Umbraco.Cms.Persistence.EFCore.Scoping.IEFCoreScopeProvider<>))),
+            "SemanticMemoryRetriever must NOT directly depend on any Scoped or upstream service — "
+            + "those are resolved per-call inside RetrieveSimilarAsync via IServiceScopeFactory.");
+    }
+
+    [Test]
+    public void Compose_DoubleCompose_SemanticMemoryRetrieverStillRegisteredExactlyOnce()
+    {
+        // Story 3.2 AC7 — TryAddSingleton idempotency pin (matches Story 1.3 / 2.2 / 3.1 patterns).
+        // A regression to plain AddSingleton would duplicate on the second call and trip Exactly(1).
+        // Also asserts NullMemoryRetriever is NOT in the descriptor list — verifies the
+        // composer surgery successfully DELETED the prior AddSingleton<IMemoryRetriever, NullMemoryRetriever>()
+        // line; if both lines accidentally land, descriptor count would be 2.
+        var (builder, services) = CreateBuilder();
+
+        new AgentMemoryComposer().Compose(builder);
+        new AgentMemoryComposer().Compose(builder);
+
+        Assert.That(services, Has.Exactly(1).Matches<ServiceDescriptor>(d =>
+            d.ServiceType == typeof(IMemoryRetriever)
+            && d.ImplementationType == typeof(SemanticMemoryRetriever)
+            && d.Lifetime == ServiceLifetime.Singleton),
+            "IMemoryRetriever must be registered exactly once under repeated Compose() calls.");
+        Assert.That(services, Has.None.Matches<ServiceDescriptor>(d =>
+            d.ServiceType == typeof(IMemoryRetriever)
+            && d.ImplementationType == typeof(NullMemoryRetriever)),
+            "The Story 1.3 NullMemoryRetriever registration must be DELETED at Story 3.2 composer surgery — "
+            + "a stray duplicate would cause last-wins resolution drift.");
+    }
+
     private static void AssertScopedRegistered<T>(IServiceCollection services)
     {
         var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(T));

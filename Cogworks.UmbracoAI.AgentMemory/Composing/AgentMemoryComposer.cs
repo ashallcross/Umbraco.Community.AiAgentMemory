@@ -67,7 +67,14 @@ public sealed class AgentMemoryComposer : IComposer
 
         // Memory retrieval (Phase 2 — depends on Umbraco.AI.Search vector store)
         builder.Services.AddSingleton<IMemoryDigestService, NullMemoryDigestService>();
-        builder.Services.AddSingleton<IMemoryRetriever, NullMemoryRetriever>();
+        // Story 3.2 — SemanticMemoryRetriever replaces the Story 1.3 NullMemoryRetriever
+        // placeholder. Singleton lifetime; per-call IServiceScopeFactory.CreateScope()
+        // for upstream Umbraco.AI surfaces + Scoped package deps (mirrors Story 3.1
+        // FeedbackIndexer pattern verbatim — captive-dep risk structurally zero).
+        // TryAddSingleton (NOT AddSingleton) honours the package-wide idempotency
+        // contract used since Story 1.3 D1 — double-Compose() in adopter hosts must
+        // not silently duplicate.
+        builder.Services.TryAddSingleton<IMemoryRetriever, SemanticMemoryRetriever>();
 
         // Background indexer (Story 3.1) — Singleton; creates per-work-item
         // Scopes via IServiceScopeFactory. Enqueued by AgentFeedbackController

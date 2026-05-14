@@ -86,14 +86,21 @@ public sealed class AgentMemoryOptions
     /// threshold are NOT injected. Range: <c>[0.0, 1.0]</c>; values outside
     /// the range surface as
     /// <see cref="Microsoft.Extensions.Options.OptionsValidationException"/>
-    /// at first read. Default: <c>0.7</c>.
+    /// at first read. Default: <c>0.35</c> — tuned to OpenAI
+    /// <c>text-embedding-3-small</c>'s empirical similarity band
+    /// <c>[0.37, 0.66]</c> observed at the Story 3.2 manual gate
+    /// (DRIFT-3.2-impl-2). Adopters using higher-quality embedding models
+    /// (e.g. <c>text-embedding-3-large</c>, whose similarity band typically
+    /// sits in <c>[0.5, 0.85]</c>) should override upward via
+    /// <c>Cogworks:AgentMemory:EligibilityThreshold</c> in
+    /// <c>appsettings.json</c>.
     /// </summary>
     /// <remarks>
     /// The retriever reads this value at runtime to filter
     /// <c>IAIVectorStore.SearchAsync</c> results in C# post-fetch (the
     /// upstream vector store has no native eligibility-threshold filter).
     /// </remarks>
-    public double EligibilityThreshold { get; set; } = 0.7;
+    public double EligibilityThreshold { get; set; } = 0.35;
 
     /// <summary>
     /// Agent GUIDs for which memory injection is enabled. <b>The ONLY way
