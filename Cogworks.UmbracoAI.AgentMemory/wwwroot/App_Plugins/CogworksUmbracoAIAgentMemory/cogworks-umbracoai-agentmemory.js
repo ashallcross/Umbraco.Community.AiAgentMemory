@@ -1,46 +1,46 @@
-import { css as g, state as h, customElement as _, nothing as m, html as c } from "@umbraco-cms/backoffice/external/lit";
+import { css as p, state as h, customElement as _, nothing as b, html as l } from "@umbraco-cms/backoffice/external/lit";
 import { UmbModalBaseElement as f } from "@umbraco-cms/backoffice/modal";
 import { UMB_AUTH_CONTEXT as y } from "@umbraco-cms/backoffice/auth";
-class l extends Error {
+class c extends Error {
   constructor() {
     super(...arguments), this.name = "AuthContextUnavailableError";
   }
 }
-async function v(t, e, r) {
-  const a = await t();
-  if (!a)
-    throw new l("Auth context unavailable");
-  const s = a.getOpenApiConfiguration();
-  let o;
+async function k(t, e, r) {
+  const o = await t();
+  if (!o)
+    throw new c("Auth context unavailable");
+  const s = o.getOpenApiConfiguration();
+  let a;
   try {
-    o = await s.token();
+    a = await s.token();
   } catch {
-    throw new l("Token acquisition failed");
+    throw new c("Token acquisition failed");
   }
-  if (!o || o.trim() === "")
-    throw new l("Token acquisition returned empty");
-  const n = r.body !== void 0, b = {
+  if (!a || a.trim() === "")
+    throw new c("Token acquisition returned empty");
+  const n = r.body !== void 0, m = {
     Accept: "application/json",
-    Authorization: `Bearer ${o}`,
+    Authorization: `Bearer ${a}`,
     ...n ? { "Content-Type": "application/json" } : {}
   }, d = { ...r.headers ?? {} };
   delete d.Authorization, delete d.authorization;
-  const p = {
-    ...b,
+  const g = {
+    ...m,
     ...d
   };
   return fetch(`${s.base}${e}`, {
     method: r.method,
     credentials: s.credentials,
     signal: r.signal,
-    headers: p,
+    headers: g,
     body: n ? JSON.stringify(r.body) : void 0
   });
 }
-var k = Object.defineProperty, w = Object.getOwnPropertyDescriptor, u = (t, e, r, a) => {
-  for (var s = a > 1 ? void 0 : a ? w(e, r) : e, o = t.length - 1, n; o >= 0; o--)
-    (n = t[o]) && (s = (a ? n(e, r, s) : n(s)) || s);
-  return a && s && k(e, r, s), s;
+var v = Object.defineProperty, w = Object.getOwnPropertyDescriptor, u = (t, e, r, o) => {
+  for (var s = o > 1 ? void 0 : o ? w(e, r) : e, a = t.length - 1, n; a >= 0; a--)
+    (n = t[a]) && (s = (o ? n(e, r, s) : n(s)) || s);
+  return o && s && v(e, r, s), s;
 };
 let i = class extends f {
   constructor() {
@@ -50,6 +50,9 @@ let i = class extends f {
       this._comment = t.target.value;
     };
   }
+  connectedCallback() {
+    super.connectedCallback(), this.closest("uui-modal-sidebar")?.setAttribute("size", "small");
+  }
   disconnectedCallback() {
     this._abortController?.abort(), super.disconnectedCallback();
   }
@@ -58,47 +61,41 @@ let i = class extends f {
   }
   _renderForm() {
     const t = this._score !== null, e = !t || this._state === "submitting", r = this._state === "submitting" ? "waiting" : void 0;
-    return c`
-      <uui-box headline="How was this run?">
-        <uui-button
-          slot="header-actions"
-          look="placeholder"
-          compact
-          label="Close"
-          @click=${this._dismiss}
-        >
-          <uui-icon name="remove"></uui-icon>
-        </uui-button>
+    return l`
+      <umb-body-layout headline="Run Feedback">
+        <uui-box headline="How was this run?">
+          <div class="row">
+            <uui-button
+              look=${this._score === "ThumbsUp" ? "primary" : "secondary"}
+              label="Helpful"
+              aria-pressed=${this._score === "ThumbsUp"}
+              @click=${() => this._selectScore("ThumbsUp")}
+            >
+              👍 Helpful
+            </uui-button>
+            <uui-button
+              look=${this._score === "ThumbsDown" ? "primary" : "secondary"}
+              label="Not helpful"
+              aria-pressed=${this._score === "ThumbsDown"}
+              @click=${() => this._selectScore("ThumbsDown")}
+            >
+              👎 Not helpful
+            </uui-button>
+          </div>
 
-        <div class="row">
-          <uui-button
-            look=${this._score === "ThumbsUp" ? "primary" : "secondary"}
-            label="Helpful"
-            aria-pressed=${this._score === "ThumbsUp"}
-            @click=${() => this._selectScore("ThumbsUp")}
-          >
-            👍 Helpful
-          </uui-button>
-          <uui-button
-            look=${this._score === "ThumbsDown" ? "primary" : "secondary"}
-            label="Not helpful"
-            aria-pressed=${this._score === "ThumbsDown"}
-            @click=${() => this._selectScore("ThumbsDown")}
-          >
-            👎 Not helpful
-          </uui-button>
-        </div>
+          ${t ? l`<uui-textarea
+                auto-height
+                label="Optional comment"
+                placeholder="Optional — explain why (helps the agent learn)"
+                maxlength="4000"
+                .value=${this._comment}
+                @input=${this._onCommentInput}
+              ></uui-textarea>` : b}
 
-        ${t ? c`<uui-textarea
-              auto-height
-              label="Optional comment"
-              placeholder="Optional — explain why (helps the agent learn)"
-              maxlength="4000"
-              .value=${this._comment}
-              @input=${this._onCommentInput}
-            ></uui-textarea>` : m}
+          ${this._state === "error" ? this._renderError() : b}
+        </uui-box>
 
-        <div class="actions">
+        <div slot="actions">
           <uui-button
             look="secondary"
             label="Cancel"
@@ -112,33 +109,23 @@ let i = class extends f {
             color="positive"
             label="Submit feedback"
             ?disabled=${e}
-            state=${r ?? m}
+            state=${r ?? b}
             @click=${this._submit}
           >
             Submit feedback
           </uui-button>
         </div>
-
-        ${this._state === "error" ? this._renderError() : m}
-      </uui-box>
+      </umb-body-layout>
     `;
   }
   _renderSuccess() {
-    return c`
-      <uui-box headline="Feedback recorded">
-        <uui-button
-          slot="header-actions"
-          look="placeholder"
-          compact
-          label="Close"
-          @click=${this._dismiss}
-        >
-          <uui-icon name="remove"></uui-icon>
-        </uui-button>
+    return l`
+      <umb-body-layout headline="Run Feedback">
+        <uui-box headline="Feedback recorded">
+          <p role="status" class="success">Thanks — your feedback was recorded.</p>
+        </uui-box>
 
-        <p role="status" class="success">Thanks — your feedback was recorded.</p>
-
-        <div class="actions">
+        <div slot="actions">
           <uui-button
             look="primary"
             color="positive"
@@ -148,11 +135,11 @@ let i = class extends f {
             Close
           </uui-button>
         </div>
-      </uui-box>
+      </umb-body-layout>
     `;
   }
   _renderError() {
-    return c`<p role="alert" class="error">${this._errorMessage}</p>`;
+    return l`<p role="alert" class="error">${this._errorMessage}</p>`;
   }
   _selectScore(t) {
     this._score = t, this._state === "error" && (this._state = "idle", this._errorMessage = "");
@@ -165,7 +152,7 @@ let i = class extends f {
     }
     this._abortController?.abort(), this._abortController = new AbortController(), this._state = "submitting", this._errorMessage = "";
     try {
-      const e = await v(
+      const e = await k(
         () => this.getContext(y),
         "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
         {
@@ -186,7 +173,7 @@ let i = class extends f {
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError")
         return;
-      if (e instanceof l) {
+      if (e instanceof c) {
         this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
         return;
       }
@@ -221,28 +208,29 @@ let i = class extends f {
     this._state = "error", this._errorMessage = "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
   }
 };
-i.styles = g`
+i.styles = p`
     :host {
       display: block;
-      max-width: 540px;
-      margin: 0 auto;
       font-family: var(--uui-font-family);
       color: var(--uui-color-text);
     }
 
+    /* Thumbs row — flex layout for the side-by-side 👍 / 👎 buttons. */
     .row {
       display: flex;
       gap: var(--uui-size-space-2);
       margin-bottom: var(--uui-size-space-3);
     }
 
-    .actions {
+    /* Actions slot — umb-footer-layout's <slot name="actions"> wraps this in
+       its own flex container, so we only need to space the buttons apart. */
+    [slot="actions"] {
       display: flex;
       gap: var(--uui-size-space-2);
-      justify-content: flex-end;
-      margin-top: var(--uui-size-space-3);
     }
 
+    /* Comment textarea — full width within the body-layout main area; UUI's
+       auto-height handles vertical growth. */
     uui-textarea {
       display: block;
       width: 100%;
@@ -250,18 +238,25 @@ i.styles = g`
       --uui-textarea-min-height: 5rem;
     }
 
+    /* Use the same positive/danger token pairs that uui-button consumes for
+       its color="positive"/color="danger" looks — guaranteed paired (contrast
+       text always reads against the background colour). The "-standalone-..."
+       variants used at Story 3.4 first cut produced an unreadable dark-green
+       on light-green combo because the contrast token didn't resolve cleanly
+       in our shadow scope. Captured as DRIFT-3.4-impl-4 at manual gate
+       2026-05-14. */
     .success {
       padding: var(--uui-size-space-3);
-      background: var(--uui-color-positive-standalone, #d4edda);
-      color: var(--uui-color-positive-standalone-contrast, #155724);
+      background: var(--uui-color-positive);
+      color: var(--uui-color-positive-contrast);
       border-radius: var(--uui-border-radius);
-      margin: 0 0 var(--uui-size-space-3);
+      margin: 0;
     }
 
     .error {
       padding: var(--uui-size-space-3);
-      background: var(--uui-color-danger-standalone, #f8d7da);
-      color: var(--uui-color-danger-standalone-contrast, #721c24);
+      background: var(--uui-color-danger);
+      color: var(--uui-color-danger-contrast);
       border-radius: var(--uui-border-radius);
       margin: var(--uui-size-space-3) 0 0;
     }
@@ -281,7 +276,7 @@ u([
 i = u([
   _("cogworks-agent-feedback")
 ], i);
-const M = [
+const $ = [
   {
     type: "modal",
     alias: "Ua.Modal.RunDetail",
@@ -291,6 +286,6 @@ const M = [
   }
 ];
 export {
-  M as manifests
+  $ as manifests
 };
 //# sourceMappingURL=cogworks-umbracoai-agentmemory.js.map

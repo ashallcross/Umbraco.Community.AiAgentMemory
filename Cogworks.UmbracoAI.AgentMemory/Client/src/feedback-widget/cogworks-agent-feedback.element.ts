@@ -57,6 +57,20 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
 
   private _abortController: AbortController | null = null;
 
+  override connectedCallback() {
+    super.connectedCallback();
+    // Automate's opener passes `size="large"` to the `<uui-modal-sidebar>` wrapper
+    // when opening `Ua.Modal.RunDetail`. We don't control the opener (we only
+    // replace the modal's CONTENT element via Strategy B), but `large` is
+    // excessive for the feedback form — it takes ~half the screen. Override the
+    // ancestor sidebar's `size` attribute to `small` so the modal frame fits
+    // the form content cleanly. Captured as DRIFT-3.4-impl-2 at Story 3.4 manual
+    // gate 2026-05-14. `small` chosen at 2026-05-14 visual-gate iteration after
+    // medium still rendered too large; the comment textarea's auto-height
+    // growth still fits cleanly within the small frame.
+    this.closest("uui-modal-sidebar")?.setAttribute("size", "small");
+  }
+
   override disconnectedCallback() {
     this._abortController?.abort();
     super.disconnectedCallback();
@@ -71,49 +85,52 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     const submitDisabled = !scoreSelected || this._state === "submitting";
     const submitState = this._state === "submitting" ? "waiting" : undefined;
 
+    // Modelled verbatim on Bellissima's `<umb-current-user-modal>` chrome:
+    // `<umb-body-layout headline="...">` provides the modal-level h3 title
+    // (rendered "Run Feedback" in our case) + the auto-rendered
+    // `<umb-footer-layout>` whose `slot="actions"` carries the bottom-anchored
+    // action buttons. Inside, a `<uui-box headline="...">` card holds the
+    // prompt h5 + the form controls. Captured as DRIFT-3.4-impl-3 at Story 3.4
+    // manual gate 2026-05-14 (visual gate). The X close icon from Story 3.4
+    // first cut was dropped — the current-user-modal doesn't carry one either;
+    // Cancel button + Esc + backdrop click are the canonical dismissal paths.
     return html`
-      <uui-box headline="How was this run?">
-        <uui-button
-          slot="header-actions"
-          look="placeholder"
-          compact
-          label="Close"
-          @click=${this._dismiss}
-        >
-          <uui-icon name="remove"></uui-icon>
-        </uui-button>
+      <umb-body-layout headline="Run Feedback">
+        <uui-box headline="How was this run?">
+          <div class="row">
+            <uui-button
+              look=${this._score === "ThumbsUp" ? "primary" : "secondary"}
+              label="Helpful"
+              aria-pressed=${this._score === "ThumbsUp"}
+              @click=${() => this._selectScore("ThumbsUp")}
+            >
+              👍 Helpful
+            </uui-button>
+            <uui-button
+              look=${this._score === "ThumbsDown" ? "primary" : "secondary"}
+              label="Not helpful"
+              aria-pressed=${this._score === "ThumbsDown"}
+              @click=${() => this._selectScore("ThumbsDown")}
+            >
+              👎 Not helpful
+            </uui-button>
+          </div>
 
-        <div class="row">
-          <uui-button
-            look=${this._score === "ThumbsUp" ? "primary" : "secondary"}
-            label="Helpful"
-            aria-pressed=${this._score === "ThumbsUp"}
-            @click=${() => this._selectScore("ThumbsUp")}
-          >
-            👍 Helpful
-          </uui-button>
-          <uui-button
-            look=${this._score === "ThumbsDown" ? "primary" : "secondary"}
-            label="Not helpful"
-            aria-pressed=${this._score === "ThumbsDown"}
-            @click=${() => this._selectScore("ThumbsDown")}
-          >
-            👎 Not helpful
-          </uui-button>
-        </div>
+          ${scoreSelected
+            ? html`<uui-textarea
+                auto-height
+                label="Optional comment"
+                placeholder="Optional — explain why (helps the agent learn)"
+                maxlength="4000"
+                .value=${this._comment}
+                @input=${this._onCommentInput}
+              ></uui-textarea>`
+            : nothing}
 
-        ${scoreSelected
-          ? html`<uui-textarea
-              auto-height
-              label="Optional comment"
-              placeholder="Optional — explain why (helps the agent learn)"
-              maxlength="4000"
-              .value=${this._comment}
-              @input=${this._onCommentInput}
-            ></uui-textarea>`
-          : nothing}
+          ${this._state === "error" ? this._renderError() : nothing}
+        </uui-box>
 
-        <div class="actions">
+        <div slot="actions">
           <uui-button
             look="secondary"
             label="Cancel"
@@ -133,28 +150,18 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
             Submit feedback
           </uui-button>
         </div>
-
-        ${this._state === "error" ? this._renderError() : nothing}
-      </uui-box>
+      </umb-body-layout>
     `;
   }
 
   private _renderSuccess() {
     return html`
-      <uui-box headline="Feedback recorded">
-        <uui-button
-          slot="header-actions"
-          look="placeholder"
-          compact
-          label="Close"
-          @click=${this._dismiss}
-        >
-          <uui-icon name="remove"></uui-icon>
-        </uui-button>
+      <umb-body-layout headline="Run Feedback">
+        <uui-box headline="Feedback recorded">
+          <p role="status" class="success">Thanks — your feedback was recorded.</p>
+        </uui-box>
 
-        <p role="status" class="success">Thanks — your feedback was recorded.</p>
-
-        <div class="actions">
+        <div slot="actions">
           <uui-button
             look="primary"
             color="positive"
@@ -164,7 +171,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
             Close
           </uui-button>
         </div>
-      </uui-box>
+      </umb-body-layout>
     `;
   }
 
@@ -306,25 +313,26 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   static override styles = css`
     :host {
       display: block;
-      max-width: 540px;
-      margin: 0 auto;
       font-family: var(--uui-font-family);
       color: var(--uui-color-text);
     }
 
+    /* Thumbs row — flex layout for the side-by-side 👍 / 👎 buttons. */
     .row {
       display: flex;
       gap: var(--uui-size-space-2);
       margin-bottom: var(--uui-size-space-3);
     }
 
-    .actions {
+    /* Actions slot — umb-footer-layout's <slot name="actions"> wraps this in
+       its own flex container, so we only need to space the buttons apart. */
+    [slot="actions"] {
       display: flex;
       gap: var(--uui-size-space-2);
-      justify-content: flex-end;
-      margin-top: var(--uui-size-space-3);
     }
 
+    /* Comment textarea — full width within the body-layout main area; UUI's
+       auto-height handles vertical growth. */
     uui-textarea {
       display: block;
       width: 100%;
@@ -332,18 +340,25 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       --uui-textarea-min-height: 5rem;
     }
 
+    /* Use the same positive/danger token pairs that uui-button consumes for
+       its color="positive"/color="danger" looks — guaranteed paired (contrast
+       text always reads against the background colour). The "-standalone-..."
+       variants used at Story 3.4 first cut produced an unreadable dark-green
+       on light-green combo because the contrast token didn't resolve cleanly
+       in our shadow scope. Captured as DRIFT-3.4-impl-4 at manual gate
+       2026-05-14. */
     .success {
       padding: var(--uui-size-space-3);
-      background: var(--uui-color-positive-standalone, #d4edda);
-      color: var(--uui-color-positive-standalone-contrast, #155724);
+      background: var(--uui-color-positive);
+      color: var(--uui-color-positive-contrast);
       border-radius: var(--uui-border-radius);
-      margin: 0 0 var(--uui-size-space-3);
+      margin: 0;
     }
 
     .error {
       padding: var(--uui-size-space-3);
-      background: var(--uui-color-danger-standalone, #f8d7da);
-      color: var(--uui-color-danger-standalone-contrast, #721c24);
+      background: var(--uui-color-danger);
+      color: var(--uui-color-danger-contrast);
       border-radius: var(--uui-border-radius);
       margin: var(--uui-size-space-3) 0 0;
     }
