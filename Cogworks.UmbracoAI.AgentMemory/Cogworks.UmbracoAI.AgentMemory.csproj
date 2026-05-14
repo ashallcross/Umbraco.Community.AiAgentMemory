@@ -28,6 +28,7 @@
     <PackageReference Include="Umbraco.Cms.Api.Management" />
     <PackageReference Include="Umbraco.AI" />
     <PackageReference Include="Umbraco.AI.Agent" />
+    <PackageReference Include="Umbraco.AI.Search" />
     <PackageReference Include="Microsoft.Extensions.AI" />
   </ItemGroup>
 

@@ -1,4 +1,5 @@
 using Cogworks.UmbracoAI.AgentMemory.Feedback;
+using Cogworks.UmbracoAI.AgentMemory.Memory;
 using Cogworks.UmbracoAI.AgentMemory.Runs;
 using Cogworks.UmbracoAI.AgentMemory.Web.Api;
 using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
@@ -20,6 +21,7 @@ namespace Cogworks.UmbracoAI.AgentMemory.Tests.Web.Api;
 public class AgentFeedbackControllerTests
 {
     private IAgentFeedbackService _feedbackService = null!;
+    private IFeedbackIndexer _indexer = null!;
     private IBackOfficeSecurityAccessor _securityAccessor = null!;
     private IAgentRunReader _runReader = null!;
     private ILogger<AgentFeedbackController> _logger = null!;
@@ -31,6 +33,7 @@ public class AgentFeedbackControllerTests
     public void SetUp()
     {
         _feedbackService = Substitute.For<IAgentFeedbackService>();
+        _indexer = Substitute.For<IFeedbackIndexer>();
         _securityAccessor = Substitute.For<IBackOfficeSecurityAccessor>();
         _runReader = Substitute.For<IAgentRunReader>();
         _logger = Substitute.For<ILogger<AgentFeedbackController>>();
@@ -52,7 +55,8 @@ public class AgentFeedbackControllerTests
             .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
                 new[] { MakeRunRecord(_agentId) }));
 
-        _controller = new AgentFeedbackController(_feedbackService, _securityAccessor, _runReader, _logger);
+        _controller = new AgentFeedbackController(
+            _feedbackService, _indexer, _securityAccessor, _runReader, _logger);
     }
 
     [TearDown]
@@ -102,6 +106,35 @@ public class AgentFeedbackControllerTests
             "actually wrong",
             _resolvedUserKey,
             Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task PostAsync_RecordsFeedbackThenEnqueuesIndexer_InOrder()
+    {
+        // Story 3.1 AC7 + AC1 — the controller enqueues indexing AFTER the
+        // service write succeeds. Ordering matters: the indexer reads the
+        // feedback row via IAgentFeedbackService.GetFeedbackForRunAsync, so
+        // the row must be persisted first.
+        var request = new AgentFeedbackPostRequest(
+            RunId: "run-1",
+            Score: FeedbackScore.ThumbsUp,
+            Comment: "looks good");
+
+        var result = await _controller.PostAsync(request, CancellationToken.None);
+
+        Assert.That(result, Is.InstanceOf<OkResult>());
+
+        Received.InOrder(() =>
+        {
+            _feedbackService.RecordFeedbackAsync(
+                "run-1",
+                _agentId,
+                FeedbackScore.ThumbsUp,
+                "looks good",
+                _resolvedUserKey,
+                Arg.Any<CancellationToken>());
+            _indexer.EnqueueIndex("run-1", _agentId);
+        });
     }
 
     [Test]

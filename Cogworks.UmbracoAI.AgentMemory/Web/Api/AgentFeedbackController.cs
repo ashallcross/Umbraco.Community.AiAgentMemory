@@ -1,5 +1,6 @@
 using Asp.Versioning;
 using Cogworks.UmbracoAI.AgentMemory.Feedback;
+using Cogworks.UmbracoAI.AgentMemory.Memory;
 using Cogworks.UmbracoAI.AgentMemory.Runs;
 using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -88,21 +89,25 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
     internal const int RunIdMaxChars = 256;
 
     private readonly IAgentFeedbackService _feedbackService;
+    private readonly IFeedbackIndexer _indexer;
     private readonly IBackOfficeSecurityAccessor _securityAccessor;
     private readonly IAgentRunReader _runReader;
     private readonly ILogger<AgentFeedbackController> _logger;
 
     public AgentFeedbackController(
         IAgentFeedbackService feedbackService,
+        IFeedbackIndexer indexer,
         IBackOfficeSecurityAccessor securityAccessor,
         IAgentRunReader runReader,
         ILogger<AgentFeedbackController> logger)
     {
         ArgumentNullException.ThrowIfNull(feedbackService);
+        ArgumentNullException.ThrowIfNull(indexer);
         ArgumentNullException.ThrowIfNull(securityAccessor);
         ArgumentNullException.ThrowIfNull(runReader);
         ArgumentNullException.ThrowIfNull(logger);
         _feedbackService = feedbackService;
+        _indexer = indexer;
         _securityAccessor = securityAccessor;
         _runReader = runReader;
         _logger = logger;
@@ -173,6 +178,11 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
             request.Comment,
             resolvedKey.Value,
             cancellationToken).ConfigureAwait(false);
+
+        // Story 3.1 — fire-and-forget enqueue. Synchronous; only schedules
+        // the indexing work on IBackgroundTaskQueue and returns. NFR-P2 is
+        // not affected — the foreground 200 OK ships immediately.
+        _indexer.EnqueueIndex(request.RunId, agentId);
 
         return Ok();
     }

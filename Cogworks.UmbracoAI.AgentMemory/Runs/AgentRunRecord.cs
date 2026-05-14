@@ -22,7 +22,7 @@ namespace Cogworks.UmbracoAI.AgentMemory.Runs;
 /// </para>
 /// </summary>
 public sealed record AgentRunRecord(
-    string RunId,                           // Metadata["Umbraco.AI.Agent.RunId"] (Copilot path; null otherwise)
+    string RunId,                           // Metadata["Umbraco.AI.Agent.RunId"] — per-chat-call upstream identifier (Copilot path; null otherwise pre-Fork-(i))
     Guid AgentId,                           // FeatureId
     int? AgentVersion,                      // FeatureVersion
     DateTime StartedUtc,                    // MIN(StartTime) — degenerate to row's StartTime in v0.1
@@ -33,6 +33,11 @@ public sealed record AgentRunRecord(
     string? ResponseSnapshotJoined,         // ordered concatenation of ResponseSnapshot
     int? TokenCountInput,                   // SUM(InputTokens)
     int? TokenCountOutput,                  // SUM(OutputTokens)
-    string? ThreadId,                       // Metadata["Umbraco.AI.Agent.ThreadId"] — conversation-level key
+    // Conversation-level / Automate-workflow-run-level grouping key. Also
+    // semantically the value persisted as the package's
+    // cogworks_agent_memory_feedback.RunId column per Story 2.3 Path (b)
+    // decision (the editor's modal hands us a ThreadId; we record it under
+    // the RunId column to keep the existing schema name).
+    string? ThreadId,                       // Metadata["Umbraco.AI.Agent.ThreadId"]
     string? UserId,
     string? TraceId);

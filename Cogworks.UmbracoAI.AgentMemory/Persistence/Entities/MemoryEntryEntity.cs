@@ -25,9 +25,12 @@ public sealed class MemoryEntryEntity
     public Guid? WorkspaceId { get; set; }
 
     /// <summary>
-    /// LLM-generated summary of the run (Story 3.1's
-    /// <c>IMemoryDigestService</c>). Capped by
-    /// <c>AgentMemoryOptions.DigestMaxChars</c>.
+    /// Memory digest for the run. In v0.1, this is the raw joined run text
+    /// (<c>PromptSnapshotJoined + ResponseSnapshotJoined + feedback comment</c>)
+    /// truncated to <c>AgentMemoryOptions.DigestMaxChars</c> — NOT an LLM
+    /// summary. The "Digest" name is retained as the architecture v1 column
+    /// name; the contents are raw joined text per PRD scope cut. Story 3.1
+    /// owns the background indexer that writes this column.
     /// </summary>
     public string DigestText { get; set; } = string.Empty;
 
@@ -38,8 +41,12 @@ public sealed class MemoryEntryEntity
     public string EmbeddingRef { get; set; } = string.Empty;
 
     /// <summary>
-    /// 0 = Pending, 1 = Embedded, 2 = Failed. Story 3.1 introduces the
-    /// <c>IndexingStatus</c> enum that maps these values.
+    /// Lifecycle ordinal — maps onto <see cref="Memory.IndexingStatus"/>
+    /// (Story 3.1): <c>0 = Pending</c>, <c>1 = Embedded</c>, <c>2 = Failed</c>.
+    /// Stored as <see cref="int"/> for EF Core friendliness; the
+    /// <see cref="Memory.IndexingStatus"/> enum is the code-side convenience
+    /// layer the indexer maps through (mirrors Story 2.1's
+    /// <c>FeedbackScore</c> ↔ <c>int Score</c> mapping).
     /// </summary>
     public int IndexingStatus { get; set; }
 

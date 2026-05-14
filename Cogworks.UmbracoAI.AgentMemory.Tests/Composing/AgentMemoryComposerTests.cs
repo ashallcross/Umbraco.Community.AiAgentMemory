@@ -1,6 +1,7 @@
 using Cogworks.UmbracoAI.AgentMemory.Composing;
 using Cogworks.UmbracoAI.AgentMemory.Configuration;
 using Cogworks.UmbracoAI.AgentMemory.Feedback;
+using Cogworks.UmbracoAI.AgentMemory.Memory;
 using Cogworks.UmbracoAI.AgentMemory.Persistence;
 using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
 using Cogworks.UmbracoAI.AgentMemory.Runs;
@@ -70,7 +71,15 @@ public class AgentMemoryComposerStartupValidationTests
         new AgentMemoryComposer().Compose(builder);
 
         AssertScopedRegistered<EFCoreAgentRunFeedbackRepository>(services);
-        AssertScopedRegistered<EFCoreMemoryEntryRepository>(services);
+        // Story 3.1 — IMemoryEntryRepository → EFCoreMemoryEntryRepository
+        // (interface-based registration; the indexer mocks the interface in
+        // its unit tests since EFCoreMemoryEntryRepository is sealed).
+        var memoryRepoDescriptor = services.SingleOrDefault(d =>
+            d.ServiceType == typeof(IMemoryEntryRepository));
+        Assert.That(memoryRepoDescriptor, Is.Not.Null,
+            "IMemoryEntryRepository must be registered (Story 3.1).");
+        Assert.That(memoryRepoDescriptor!.Lifetime, Is.EqualTo(ServiceLifetime.Scoped));
+        Assert.That(memoryRepoDescriptor.ImplementationType, Is.EqualTo(typeof(EFCoreMemoryEntryRepository)));
     }
 
     [Test]
@@ -350,6 +359,65 @@ public class AgentMemoryComposerStartupValidationTests
             "Story 2.2 must not introduce a Singleton consuming a Scoped repository — "
             + "AgentMemoryBackofficeApiComposer's IOperationIdHandler is Singleton with "
             + "only Singleton deps (IOptions<ApiVersioningOptions>).");
+    }
+
+    [Test]
+    public void Compose_StartupValidation_FeedbackIndexer_NoCaptiveDependency()
+    {
+        // Story 3.1 AC5 — IFeedbackIndexer → FeedbackIndexer at Singleton
+        // lifetime; the Singleton consumes IServiceScopeFactory + framework
+        // singletons only. The indexer's per-call IServiceScope is the
+        // canonical Microsoft pattern for Singleton-services-consuming-Scoped
+        // — captive-dep risk is structurally zero.
+        var (builder, services) = CreateBuilder();
+
+        new AgentMemoryComposer().Compose(builder);
+
+        var indexerDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IFeedbackIndexer));
+        Assert.That(indexerDescriptor, Is.Not.Null, "IFeedbackIndexer must be registered");
+        Assert.That(indexerDescriptor!.Lifetime, Is.EqualTo(ServiceLifetime.Singleton),
+            "IFeedbackIndexer must be Singleton — the indexer creates per-work-item scopes "
+            + "via IServiceScopeFactory.CreateScope(); a Scoped lifetime would defeat the queue model.");
+        Assert.That(indexerDescriptor.ImplementationType, Is.EqualTo(typeof(FeedbackIndexer)));
+
+        // FeedbackIndexer's ctor deps: framework singletons + our options
+        // monitor + TimeProvider — no direct Scoped repository / no direct
+        // IEFCoreScopeProvider<>. The Singleton-on-Scoped indirection is
+        // managed via IServiceScopeFactory (the per-call scope is created
+        // inside IndexAsync, NOT injected through the ctor).
+        var ctorParams = typeof(FeedbackIndexer).GetConstructors()
+            .Single()
+            .GetParameters();
+        Assert.That(ctorParams, Has.None.Matches<System.Reflection.ParameterInfo>(p =>
+            p.ParameterType == typeof(EFCoreAgentRunFeedbackRepository)
+            || p.ParameterType == typeof(EFCoreMemoryEntryRepository)
+            || p.ParameterType == typeof(IMemoryEntryRepository)
+            || (p.ParameterType.IsGenericType
+                && p.ParameterType.GetGenericTypeDefinition() == typeof(Umbraco.Cms.Persistence.EFCore.Scoping.IEFCoreScopeProvider<>))),
+            "FeedbackIndexer must NOT directly depend on Scoped repository or IEFCoreScopeProvider<> — "
+            + "those are resolved per-call inside IndexAsync via IServiceScopeFactory.");
+    }
+
+    [Test]
+    public void Compose_DoubleCompose_FeedbackIndexerStillRegisteredExactlyOnce()
+    {
+        // Story 3.1 AC5 — TryAddSingleton idempotency pin (matches Story 1.3 / 2.2 patterns).
+        // A regression to plain AddSingleton would duplicate on the second call and trip Exactly(1).
+        var (builder, services) = CreateBuilder();
+
+        new AgentMemoryComposer().Compose(builder);
+        new AgentMemoryComposer().Compose(builder);
+
+        Assert.That(services, Has.Exactly(1).Matches<ServiceDescriptor>(d =>
+            d.ServiceType == typeof(IFeedbackIndexer)
+            && d.ImplementationType == typeof(FeedbackIndexer)
+            && d.Lifetime == ServiceLifetime.Singleton),
+            "IFeedbackIndexer must be registered exactly once under repeated Compose() calls.");
+        Assert.That(services, Has.Exactly(1).Matches<ServiceDescriptor>(d =>
+            d.ServiceType == typeof(IMemoryEntryRepository)
+            && d.ImplementationType == typeof(EFCoreMemoryEntryRepository)
+            && d.Lifetime == ServiceLifetime.Scoped),
+            "IMemoryEntryRepository must be registered exactly once under repeated Compose() calls.");
     }
 
     private static void AssertScopedRegistered<T>(IServiceCollection services)

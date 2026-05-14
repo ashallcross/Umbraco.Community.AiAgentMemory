@@ -45,7 +45,11 @@ public sealed class AgentMemoryComposer : IComposer
             (options, connectionString, providerName, _) =>
                 options.UseDatabaseProvider(providerName!, connectionString!));
         builder.Services.AddScoped<EFCoreAgentRunFeedbackRepository>();
-        builder.Services.AddScoped<EFCoreMemoryEntryRepository>();
+        // Story 3.1 — interface-based registration replaces the Story 1.1
+        // concrete-type AddScoped<EFCoreMemoryEntryRepository>. The indexer
+        // (Singleton) needs IMemoryEntryRepository to be a mockable seam in
+        // unit tests because EFCoreMemoryEntryRepository is sealed.
+        builder.Services.TryAddScoped<IMemoryEntryRepository, EFCoreMemoryEntryRepository>();
 
         // Run reading (Story 1.2 — composes on upstream IAIAuditLogService;
         // we do NOT own a runs table, AR8/AR9).
@@ -64,6 +68,13 @@ public sealed class AgentMemoryComposer : IComposer
         // Memory retrieval (Phase 2 — depends on Umbraco.AI.Search vector store)
         builder.Services.AddSingleton<IMemoryDigestService, NullMemoryDigestService>();
         builder.Services.AddSingleton<IMemoryRetriever, NullMemoryRetriever>();
+
+        // Background indexer (Story 3.1) — Singleton; creates per-work-item
+        // Scopes via IServiceScopeFactory. Enqueued by AgentFeedbackController
+        // after a successful POST. TryAddSingleton (NOT AddSingleton) honours
+        // the package-wide idempotency contract — double-Compose() in adopter
+        // hosts must not silently duplicate the registration.
+        builder.Services.TryAddSingleton<IFeedbackIndexer, FeedbackIndexer>();
 
         // Middleware wiring is left to the implementer in Week 3 — see
         // 06-architecture-v1.md and 11-week-by-week-plan.md in the planning repo.
