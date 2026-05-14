@@ -23,19 +23,25 @@ type WidgetState = "idle" | "submitting" | "success" | "error";
 
 /**
  * Story 2.3 — inline feedback widget for an agent run.
+ * Story 3.4 — UUI primitive adoption + Bellissima-native chrome.
  *
- * Replaces `Ua.Modal.RunDetail` (Strategy B locked at Task 0). Renders thumbs-up /
- * thumbs-down + optional comment + submit. On submit, POSTs to
+ * Replaces `Ua.Modal.RunDetail` (Strategy B locked at Story 2.3 Task 0). Renders
+ * thumbs-up / thumbs-down + optional comment + submit. On submit, POSTs to
  * `/umbraco/management/api/v1/cogworks-agent-memory/feedback` (Story 2.2's
  * controller) via bearer-token auth (`UMB_AUTH_CONTEXT.getOpenApiConfiguration()`).
  *
  * NFR-A1/A2: thumbs state distinguished by BOTH icon AND text label (never colour
- * alone); `aria-pressed` toggles on selected thumb; `:focus-visible` outlines on
- * all controls; success state announced via `role="status"`; error state via
- * `role="alert"`.
+ * alone); `aria-pressed` toggles on selected thumb; `:focus-visible` via UUI
+ * primitives' built-in focus styles; success state announced via `role="status"`;
+ * error state via `role="alert"`.
  *
- * XSS defence (AC9): all rendered content goes through Lit's auto-encoding
- * template interpolation. `unsafeHTML` is NEVER imported.
+ * XSS defence (Story 2.3 AC9): all rendered content goes through Lit's auto-
+ * encoding template interpolation. `unsafeHTML` is NEVER imported.
+ *
+ * Confirm-before-cancel-with-unsaved-typed-comment: deferred to v0.2 per Story 3.4
+ * Locked decision #4. Current behaviour: Cancel discards unsaved comment without
+ * prompting. A pure-state inline confirm OR Bellissima confirm-modal pattern is
+ * a candidate when v0.2 ships broader UX polish.
  */
 @customElement("cogworks-agent-feedback")
 export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
@@ -57,106 +63,114 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   }
 
   override render() {
-    return html`
-      ${this._state === "success" ? this._renderSuccess() : this._renderForm()}
-      ${this._state === "error" ? this._renderError() : nothing}
-    `;
+    return this._state === "success" ? this._renderSuccess() : this._renderForm();
   }
 
   private _renderForm() {
     const scoreSelected = this._score !== null;
     const submitDisabled = !scoreSelected || this._state === "submitting";
+    const submitState = this._state === "submitting" ? "waiting" : undefined;
 
     return html`
-      <header class="modal-head">
-        <h3>How was this run?</h3>
-        <button
-          type="button"
-          class="close-icon"
-          aria-label="Close"
-          title="Close"
+      <uui-box headline="How was this run?">
+        <uui-button
+          slot="header-actions"
+          look="placeholder"
+          compact
+          label="Close"
           @click=${this._dismiss}
         >
-          ✕
-        </button>
-      </header>
+          <uui-icon name="remove"></uui-icon>
+        </uui-button>
 
-      <div class="row">
-        <button
-          type="button"
-          class="thumb ${this._score === "ThumbsUp" ? "active" : ""}"
-          aria-label="Helpful"
-          aria-pressed="${this._score === "ThumbsUp"}"
-          @click=${() => this._selectScore("ThumbsUp")}
-        >
-          👍 Helpful
-        </button>
-        <button
-          type="button"
-          class="thumb ${this._score === "ThumbsDown" ? "active" : ""}"
-          aria-label="Not helpful"
-          aria-pressed="${this._score === "ThumbsDown"}"
-          @click=${() => this._selectScore("ThumbsDown")}
-        >
-          👎 Not helpful
-        </button>
-      </div>
+        <div class="row">
+          <uui-button
+            look=${this._score === "ThumbsUp" ? "primary" : "secondary"}
+            label="Helpful"
+            aria-pressed=${this._score === "ThumbsUp"}
+            @click=${() => this._selectScore("ThumbsUp")}
+          >
+            👍 Helpful
+          </uui-button>
+          <uui-button
+            look=${this._score === "ThumbsDown" ? "primary" : "secondary"}
+            label="Not helpful"
+            aria-pressed=${this._score === "ThumbsDown"}
+            @click=${() => this._selectScore("ThumbsDown")}
+          >
+            👎 Not helpful
+          </uui-button>
+        </div>
 
-      <textarea
-        ?hidden=${!scoreSelected}
-        aria-label="Optional comment"
-        placeholder="Optional — explain why (helps the agent learn)"
-        maxlength="4000"
-        .value=${this._comment}
-        @input=${(e: Event) =>
-          (this._comment = (e.target as HTMLTextAreaElement).value)}
-      ></textarea>
+        ${scoreSelected
+          ? html`<uui-textarea
+              auto-height
+              label="Optional comment"
+              placeholder="Optional — explain why (helps the agent learn)"
+              maxlength="4000"
+              .value=${this._comment}
+              @input=${this._onCommentInput}
+            ></uui-textarea>`
+          : nothing}
 
-      <div class="actions">
-        <button
-          type="button"
-          class="cancel"
-          ?disabled=${this._state === "submitting"}
-          @click=${this._dismiss}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="submit"
-          ?disabled=${submitDisabled}
-          @click=${this._submit}
-        >
-          ${this._state === "submitting" ? "Submitting..." : "Submit feedback"}
-        </button>
-      </div>
+        <div class="actions">
+          <uui-button
+            look="secondary"
+            label="Cancel"
+            ?disabled=${this._state === "submitting"}
+            @click=${this._dismiss}
+          >
+            Cancel
+          </uui-button>
+          <uui-button
+            look="primary"
+            color="positive"
+            label="Submit feedback"
+            ?disabled=${submitDisabled}
+            state=${submitState ?? nothing}
+            @click=${this._submit}
+          >
+            Submit feedback
+          </uui-button>
+        </div>
+
+        ${this._state === "error" ? this._renderError() : nothing}
+      </uui-box>
     `;
   }
 
   private _renderSuccess() {
     return html`
-      <header class="modal-head">
-        <h3>Feedback recorded</h3>
-        <button
-          type="button"
-          class="close-icon"
-          aria-label="Close"
-          title="Close"
+      <uui-box headline="Feedback recorded">
+        <uui-button
+          slot="header-actions"
+          look="placeholder"
+          compact
+          label="Close"
           @click=${this._dismiss}
         >
-          ✕
-        </button>
-      </header>
-      <p role="status" class="success">Thanks — your feedback was recorded.</p>
-      <div class="actions">
-        <button type="button" class="submit" @click=${this._dismiss}>Close</button>
-      </div>
+          <uui-icon name="remove"></uui-icon>
+        </uui-button>
+
+        <p role="status" class="success">Thanks — your feedback was recorded.</p>
+
+        <div class="actions">
+          <uui-button
+            look="primary"
+            color="positive"
+            label="Close"
+            @click=${this._dismiss}
+          >
+            Close
+          </uui-button>
+        </div>
+      </uui-box>
     `;
   }
 
   private _renderError() {
     // Lit auto-encodes the template-literal interpolation — _errorMessage
-    // renders as text, NEVER as HTML (AC9 XSS-defence contract).
+    // renders as text, NEVER as HTML (Story 2.3 AC9 XSS-defence contract).
     return html`<p role="alert" class="error">${this._errorMessage}</p>`;
   }
 
@@ -168,6 +182,15 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     // a return value (feedback was fire-and-go via POST already if we're in
     // success state; cancel is the user's choice if we're in idle/error).
     this._rejectModal();
+  };
+
+  private _onCommentInput = (e: Event) => {
+    // `<uui-textarea>` forwards the native input event from its inner textarea
+    // (`@fires InputEvent#input on input` per its .d.ts). We cast through
+    // `unknown` to a structural type so we don't depend on the
+    // UUITextareaElement import — `EventTarget` doesn't carry `value` so a
+    // direct cast won't compile under strict TS.
+    this._comment = (e.target as unknown as { value: string }).value;
   };
 
   private _selectScore(score: ScoreString) {
@@ -283,136 +306,46 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   static override styles = css`
     :host {
       display: block;
-      padding: var(--uui-size-space-5, 1.5rem);
       max-width: 540px;
       margin: 0 auto;
-      font-family: var(--uui-font-family, system-ui, sans-serif);
-      color: var(--uui-color-text, #1a1a1a);
-    }
-
-    .modal-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: var(--uui-size-space-3, 0.75rem);
-      margin-bottom: var(--uui-size-space-3, 0.75rem);
-    }
-
-    h3 {
-      margin: 0;
-      font-size: 1.15rem;
-      font-weight: 600;
-    }
-
-    .close-icon {
-      padding: 0.25rem 0.5rem;
-      font-size: 1.1rem;
-      line-height: 1;
-      background: transparent;
-      border: 1px solid transparent;
-    }
-
-    .close-icon:hover {
-      background: var(--uui-color-surface-alt, #f0f0f0);
-      border-color: var(--uui-color-border, #c0c0c0);
-    }
-
-    .actions {
-      display: flex;
-      gap: var(--uui-size-space-2, 0.5rem);
-      justify-content: flex-end;
-      margin-top: var(--uui-size-space-3, 0.75rem);
-    }
-
-    .cancel {
-      background: var(--uui-color-surface, #ffffff);
-      color: inherit;
+      font-family: var(--uui-font-family);
+      color: var(--uui-color-text);
     }
 
     .row {
       display: flex;
-      gap: var(--uui-size-space-2, 0.5rem);
-      margin-bottom: var(--uui-size-space-3, 0.75rem);
+      gap: var(--uui-size-space-2);
+      margin-bottom: var(--uui-size-space-3);
     }
 
-    button {
-      cursor: pointer;
-      font: inherit;
-      padding: var(--uui-size-space-2, 0.5rem) var(--uui-size-space-4, 1rem);
-      border: 1px solid var(--uui-color-border, #c0c0c0);
-      background: var(--uui-color-surface, #ffffff);
-      color: inherit;
-      border-radius: var(--uui-border-radius, 4px);
-      transition: background-color 0.12s ease, border-color 0.12s ease;
+    .actions {
+      display: flex;
+      gap: var(--uui-size-space-2);
+      justify-content: flex-end;
+      margin-top: var(--uui-size-space-3);
     }
 
-    button:hover:not(:disabled) {
-      background: var(--uui-color-surface-alt, #f0f0f0);
-    }
-
-    button:focus-visible {
-      outline: 2px solid var(--uui-color-focus, #3544b1);
-      outline-offset: 2px;
-    }
-
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .thumb.active {
-      background: var(--uui-color-selected, #3544b1);
-      border-color: var(--uui-color-selected, #3544b1);
-      color: var(--uui-color-selected-contrast, #ffffff);
-    }
-
-    textarea {
+    uui-textarea {
       display: block;
       width: 100%;
-      min-height: 5rem;
-      padding: var(--uui-size-space-2, 0.5rem);
-      margin-bottom: var(--uui-size-space-3, 0.75rem);
-      font: inherit;
-      border: 1px solid var(--uui-color-border, #c0c0c0);
-      border-radius: var(--uui-border-radius, 4px);
-      box-sizing: border-box;
-      resize: vertical;
-    }
-
-    textarea:focus-visible {
-      outline: 2px solid var(--uui-color-focus, #3544b1);
-      outline-offset: 2px;
-    }
-
-    textarea[hidden] {
-      display: none;
-    }
-
-    .submit {
-      background: var(--uui-color-positive, #1c7430);
-      color: var(--uui-color-positive-contrast, #ffffff);
-      border-color: var(--uui-color-positive, #1c7430);
-    }
-
-    .submit:hover:not(:disabled) {
-      background: var(--uui-color-positive-emphasis, #155724);
-      border-color: var(--uui-color-positive-emphasis, #155724);
+      margin-bottom: var(--uui-size-space-3);
+      --uui-textarea-min-height: 5rem;
     }
 
     .success {
-      padding: var(--uui-size-space-3, 0.75rem);
+      padding: var(--uui-size-space-3);
       background: var(--uui-color-positive-standalone, #d4edda);
       color: var(--uui-color-positive-standalone-contrast, #155724);
-      border-radius: var(--uui-border-radius, 4px);
-      margin: 0;
+      border-radius: var(--uui-border-radius);
+      margin: 0 0 var(--uui-size-space-3);
     }
 
     .error {
-      padding: var(--uui-size-space-3, 0.75rem);
+      padding: var(--uui-size-space-3);
       background: var(--uui-color-danger-standalone, #f8d7da);
       color: var(--uui-color-danger-standalone-contrast, #721c24);
-      border-radius: var(--uui-border-radius, 4px);
-      margin: var(--uui-size-space-3, 0.75rem) 0 0;
+      border-radius: var(--uui-border-radius);
+      margin: var(--uui-size-space-3) 0 0;
     }
   `;
 }
