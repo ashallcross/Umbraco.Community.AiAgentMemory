@@ -2,6 +2,7 @@ using Cogworks.UmbracoAI.AgentMemory.Composing;
 using Cogworks.UmbracoAI.AgentMemory.Configuration;
 using Cogworks.UmbracoAI.AgentMemory.Feedback;
 using Cogworks.UmbracoAI.AgentMemory.Memory;
+using Cogworks.UmbracoAI.AgentMemory.Middleware;
 using Cogworks.UmbracoAI.AgentMemory.Persistence;
 using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
 using Cogworks.UmbracoAI.AgentMemory.Runs;
@@ -10,7 +11,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Swashbuckle.AspNetCore.SwaggerGen;
+using Umbraco.AI.Core.Chat;
 using Umbraco.Cms.Api.Common.OpenApi;
+using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 using Umbraco.Cms.Persistence.EFCore.Scoping;
 
@@ -29,13 +32,29 @@ public class AgentMemoryComposerStartupValidationTests
     private static (IUmbracoBuilder builder, IServiceCollection services) CreateBuilder(
         IConfiguration? configuration = null)
     {
+        var (builder, services, _) = CreateBuilderWithChatMiddleware(configuration);
+        return (builder, services);
+    }
+
+    // Story 3.3 — AgentMemoryComposer now calls builder.AIChatMiddleware()
+    // which routes through builder.WithCollectionBuilder<AIChatMiddlewareCollectionBuilder>().
+    // Substitute.For<IUmbracoBuilder>() returns null for generic methods by default,
+    // so the call would NRE without an explicit Returns(). Wiring a real
+    // AIChatMiddlewareCollectionBuilder lets the composer's Append<T>() land in a
+    // real type list that tests can introspect via RegisterWith(IServiceCollection).
+    private static (IUmbracoBuilder builder, IServiceCollection services, AIChatMiddlewareCollectionBuilder chatMiddlewareBuilder) CreateBuilderWithChatMiddleware(
+        IConfiguration? configuration = null)
+    {
         var services = new ServiceCollection();
         var config = configuration ?? new ConfigurationBuilder().Build();
+
+        var chatMiddlewareBuilder = new AIChatMiddlewareCollectionBuilder();
 
         var builder = Substitute.For<IUmbracoBuilder>();
         builder.Services.Returns(services);
         builder.Config.Returns(config);
-        return (builder, services);
+        builder.WithCollectionBuilder<AIChatMiddlewareCollectionBuilder>().Returns(chatMiddlewareBuilder);
+        return (builder, services, chatMiddlewareBuilder);
     }
 
     [Test]
@@ -486,6 +505,121 @@ public class AgentMemoryComposerStartupValidationTests
             && d.ImplementationType == typeof(NullMemoryRetriever)),
             "The Story 1.3 NullMemoryRetriever registration must be DELETED at Story 3.2 composer surgery — "
             + "a stray duplicate would cause last-wins resolution drift.");
+    }
+
+    [Test]
+    public void Compose_StartupValidation_MemoryInjectionChatMiddleware_NoCaptiveDependency()
+    {
+        // Story 3.3 AC7 / AC8.13 — MemoryInjectionChatMiddleware ctor takes
+        // only framework + package Singletons (IMemoryRetriever,
+        // IAIRuntimeContextAccessor, IOptionsMonitor<>, ILogger<>). No direct
+        // Scoped repository, no IAIVectorStore / IAIEmbeddingService /
+        // IAIProfileService — those are resolved per-call INSIDE
+        // SemanticMemoryRetriever's IServiceScope (Story 3.2). Mirrors
+        // Compose_StartupValidation_SemanticMemoryRetriever_NoCaptiveDependency
+        // verbatim.
+        var (builder, services, chatMiddlewareBuilder) = CreateBuilderWithChatMiddleware();
+
+        new AgentMemoryComposer().Compose(builder);
+
+        // The middleware type lands in the AIChatMiddlewareCollectionBuilder's
+        // internal type list via .Append<T>(); GetTypes() exposes it as the
+        // descriptor introspection surface (the IServiceCollection descriptors
+        // are populated later at IUmbracoBuilder.Build() time, NOT at .Append<T>()
+        // call time — DRIFT-3.3-4 resolution).
+        var middlewareTypes = chatMiddlewareBuilder.GetTypes().ToArray();
+        Assert.That(middlewareTypes, Has.Some.EqualTo(typeof(MemoryInjectionChatMiddleware)),
+            "MemoryInjectionChatMiddleware must be registered into the "
+            + "AIChatMiddlewareCollectionBuilder via builder.AIChatMiddleware().Append<T>().");
+
+        var ctorParams = typeof(MemoryInjectionChatMiddleware).GetConstructors()
+            .Single()
+            .GetParameters();
+        Assert.That(ctorParams, Has.None.Matches<System.Reflection.ParameterInfo>(p =>
+            p.ParameterType == typeof(IMemoryEntryRepository)
+            || p.ParameterType == typeof(IAgentFeedbackService)
+            || p.ParameterType == typeof(EFCoreAgentRunFeedbackRepository)
+            || p.ParameterType == typeof(EFCoreMemoryEntryRepository)
+            || p.ParameterType == typeof(Umbraco.AI.Search.Core.VectorStore.IAIVectorStore)
+            || p.ParameterType == typeof(Umbraco.AI.Core.Embeddings.IAIEmbeddingService)
+            || p.ParameterType == typeof(Umbraco.AI.Core.Profiles.IAIProfileService)
+            || (p.ParameterType.IsGenericType
+                && p.ParameterType.GetGenericTypeDefinition() == typeof(IEFCoreScopeProvider<>))),
+            "MemoryInjectionChatMiddleware must NOT directly depend on any Scoped "
+            + "repository or upstream Umbraco.AI service — IMemoryRetriever is the "
+            + "Singleton seam (Story 3.2) that internalises per-call scope discipline.");
+
+        // Captive-dep guard (carry-forward): no Singleton in the package's
+        // surface depends on a Scoped repository or IEFCoreScopeProvider<>.
+        var ourSingletonsTakingScopedDeps = services
+            .Where(d => d.Lifetime == ServiceLifetime.Singleton
+                        && d.ImplementationType is not null
+                        && d.ImplementationType.Assembly == typeof(AgentMemoryComposer).Assembly)
+            .Where(d => d.ImplementationType!.GetConstructors()
+                .Any(c => c.GetParameters().Any(p =>
+                    p.ParameterType == typeof(EFCoreAgentRunFeedbackRepository)
+                    || p.ParameterType == typeof(EFCoreMemoryEntryRepository)
+                    || (p.ParameterType.IsGenericType
+                        && p.ParameterType.GetGenericTypeDefinition() == typeof(IEFCoreScopeProvider<>)))))
+            .ToArray();
+
+        Assert.That(ourSingletonsTakingScopedDeps, Is.Empty,
+            "Story 3.3 must not introduce a Singleton consuming a Scoped repository — "
+            + "the captive-dep guard carries from Stories 1.1 / 1.2 / 1.3 / 2.1 / 2.2 / 3.1 / 3.2.");
+    }
+
+    [Test]
+    public void Compose_DoubleCompose_MemoryInjectionChatMiddleware_StillRegisteredExactlyOnce()
+    {
+        // Story 3.3 AC7 / AC8.14 — AIChatMiddlewareCollectionBuilder.Append<T>()
+        // routes through OrderedCollectionBuilderBase<>.Append<T> which is
+        // de-dup-by-move-to-end (REMOVES any existing entry for T before adding it).
+        // Decompile-verified 2026-05-14 (DRIFT-3.3-4 resolution). The double-Compose
+        // therefore lands exactly 1 entry; no composer-side guard required.
+        var (builder, _, chatMiddlewareBuilder) = CreateBuilderWithChatMiddleware();
+
+        new AgentMemoryComposer().Compose(builder);
+        new AgentMemoryComposer().Compose(builder);
+
+        var middlewareTypes = chatMiddlewareBuilder.GetTypes().ToArray();
+        var count = middlewareTypes.Count(t => t == typeof(MemoryInjectionChatMiddleware));
+        Assert.That(count, Is.EqualTo(1),
+            "MemoryInjectionChatMiddleware must be registered exactly once under "
+            + "repeated Compose() calls. OrderedCollectionBuilderBase<>.Append<T> is "
+            + "de-dup-by-move-to-end (REMOVES then re-adds), so a regression that "
+            + "switches to a non-de-duping append would trip this assertion.");
+    }
+
+    [Test]
+    public void Compose_HasComposeAfterAttribute_TargetingUmbracoAIAgentComposer()
+    {
+        // Story 3.3 AC7 / AC8.15 — LOAD-BEARING DRIFT-3.3-9 attribute-reflection pin.
+        // Without [ComposeAfter(typeof(UmbracoAIAgentComposer))] on AgentMemoryComposer,
+        // Umbraco's composer-orchestration may schedule us BEFORE upstream — at which
+        // point builder.AIChatMiddleware().Append<MemoryInjectionChatMiddleware>() lands
+        // on an empty collection; upstream then Append's AIAuditingChatMiddleware LATER,
+        // making Auditing the OUTER wrapper at runtime; our enrichment runs INSIDE
+        // auditing; the injected system message is NOT captured in PromptSnapshot;
+        // FR25 + FR43 silently fail.
+        //
+        // Pure attribute reflection — cheap, deterministic. The behavioural
+        // verification (boot-time AIChatMiddlewareCollection ordering) lives at the
+        // AC9.b manual-gate probe (h). This test protects against the attribute
+        // being silently dropped during a future refactor.
+        var attributes = typeof(AgentMemoryComposer)
+            .GetCustomAttributes(typeof(ComposeAfterAttribute), inherit: false)
+            .Cast<ComposeAfterAttribute>()
+            .ToArray();
+
+        Assert.That(attributes, Has.Some.Matches<ComposeAfterAttribute>(a =>
+            a.RequiredType == typeof(Umbraco.AI.Agent.Startup.Configuration.UmbracoAIAgentComposer)),
+            "AgentMemoryComposer must carry [ComposeAfter(typeof(UmbracoAIAgentComposer))] "
+            + "so Umbraco's composer-orchestration runs upstream's UmbracoAIComposer + "
+            + "UmbracoAIAgentComposer chain BEFORE us — guaranteeing upstream's "
+            + "Append<AIAuditingChatMiddleware>() lands in AIChatMiddlewareCollection "
+            + "BEFORE our Append<MemoryInjectionChatMiddleware>(). At runtime our "
+            + "middleware then wraps OUTSIDE Auditing, capturing enriched PromptSnapshot "
+            + "per FR25 + FR43 (DRIFT-3.3-9 LOAD-BEARING contract).");
     }
 
     private static void AssertScopedRegistered<T>(IServiceCollection services)

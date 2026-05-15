@@ -4,9 +4,11 @@ using Microsoft.Extensions.Options;
 using Cogworks.UmbracoAI.AgentMemory.Configuration;
 using Cogworks.UmbracoAI.AgentMemory.Feedback;
 using Cogworks.UmbracoAI.AgentMemory.Memory;
+using Cogworks.UmbracoAI.AgentMemory.Middleware;
 using Cogworks.UmbracoAI.AgentMemory.Persistence;
 using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
 using Cogworks.UmbracoAI.AgentMemory.Runs;
+using Umbraco.AI.Extensions;
 using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 using Umbraco.Extensions;
@@ -18,6 +20,28 @@ namespace Cogworks.UmbracoAI.AgentMemory.Composing;
 /// at startup. All DI registration goes through here — never through
 /// <c>Program.cs</c> or extension methods.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <c>[ComposeAfter(typeof(UmbracoAIAgentComposer))]</c> (DRIFT-3.3-9
+/// LOAD-BEARING) guarantees Umbraco's composer-orchestration runs upstream's
+/// <c>UmbracoAIComposer</c> + <c>UmbracoAIAgentComposer</c> chain BEFORE this
+/// composer. That ordering matters because Story 3.3 appends
+/// <c>MemoryInjectionChatMiddleware</c> to <c>AIChatMiddlewareCollection</c>;
+/// upstream's <c>Append&lt;AIAuditingChatMiddleware&gt;()</c> must land first so
+/// our middleware ends up at a LATER collection position. At runtime
+/// <c>AIChatClientFactory.ApplyMiddleware</c> folds via
+/// <c>client = middleware.Apply(client)</c> in collection order, so later
+/// position = OUTER wrapper. Our middleware therefore wraps OUTSIDE Auditing;
+/// we enrich the prompt first, then delegate inward into the Auditing-wrapped
+/// client, which captures the enriched <c>PromptSnapshot</c> per FR25 + FR43.
+/// </para>
+/// <para>
+/// <c>UmbracoAIAgentComposer</c> is the correct anchor because it is itself
+/// <c>[ComposeAfter(typeof(UmbracoAIComposer))]</c>; depending on the leaf
+/// gives deterministic placement after both.
+/// </para>
+/// </remarks>
+[ComposeAfter(typeof(Umbraco.AI.Agent.Startup.Configuration.UmbracoAIAgentComposer))]
 public sealed class AgentMemoryComposer : IComposer
 {
     public void Compose(IUmbracoBuilder builder)
@@ -83,7 +107,25 @@ public sealed class AgentMemoryComposer : IComposer
         // hosts must not silently duplicate the registration.
         builder.Services.TryAddSingleton<IFeedbackIndexer, FeedbackIndexer>();
 
-        // Middleware wiring is left to the implementer in Week 3 — see
-        // 06-architecture-v1.md and 11-week-by-week-plan.md in the planning repo.
+        // Story 3.3 — register MemoryInjectionChatMiddleware in the chat pipeline.
+        // builder.AIChatMiddleware().Append<T>() applies our middleware via
+        // Apply(IChatClient inner) each time the chat pipeline is constructed.
+        // Composes WITH upstream's AIAuditingChatMiddleware such that the injected
+        // "Lessons from past runs" system message is captured in PromptSnapshot
+        // per FR25 + FR43 (outcome-pinned by AC9.b manual gate).
+        //
+        // Append<T>() is de-dup-by-move-to-end per
+        // OrderedCollectionBuilderBase<>.Append<T> (DRIFT-3.3-4 resolution,
+        // decompile-verified 2026-05-14) — 2× Compose() leaves exactly one
+        // registration without a composer-side guard.
+        //
+        // ORDERING (DRIFT-3.3-9 LOAD-BEARING): the
+        // [ComposeAfter(typeof(UmbracoAIAgentComposer))] attribute on this class
+        // ensures upstream registers AIAuditingChatMiddleware FIRST so our Append
+        // lands AFTER. AIChatClientFactory.ApplyMiddleware folds via
+        // client = middleware.Apply(client) in collection order; later position
+        // = OUTER wrapper at runtime. Our middleware wraps OUTSIDE Auditing; we
+        // enrich, delegate inward, Auditing captures the enriched PromptSnapshot.
+        builder.AIChatMiddleware().Append<MemoryInjectionChatMiddleware>();
     }
 }
