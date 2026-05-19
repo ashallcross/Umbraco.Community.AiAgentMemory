@@ -1,50 +1,50 @@
-import { css as p, state as h, customElement as _, nothing as b, html as l } from "@umbraco-cms/backoffice/external/lit";
-import { UmbModalBaseElement as f } from "@umbraco-cms/backoffice/modal";
-import { UMB_AUTH_CONTEXT as y } from "@umbraco-cms/backoffice/auth";
-class c extends Error {
+import { css as f, state as h, customElement as y, nothing as u, html as s } from "@umbraco-cms/backoffice/external/lit";
+import { UmbModalBaseElement as v } from "@umbraco-cms/backoffice/modal";
+import { UMB_AUTH_CONTEXT as p } from "@umbraco-cms/backoffice/auth";
+class d extends Error {
   constructor() {
     super(...arguments), this.name = "AuthContextUnavailableError";
   }
 }
-async function k(t, e, r) {
+async function b(t, e, a) {
   const o = await t();
   if (!o)
-    throw new c("Auth context unavailable");
-  const s = o.getOpenApiConfiguration();
-  let a;
+    throw new d("Auth context unavailable");
+  const r = o.getOpenApiConfiguration();
+  let n;
   try {
-    a = await s.token();
+    n = await r.token();
   } catch {
-    throw new c("Token acquisition failed");
+    throw new d("Token acquisition failed");
   }
-  if (!a || a.trim() === "")
-    throw new c("Token acquisition returned empty");
-  const n = r.body !== void 0, m = {
+  if (!n || n.trim() === "")
+    throw new d("Token acquisition returned empty");
+  const c = a.body !== void 0, m = {
     Accept: "application/json",
-    Authorization: `Bearer ${a}`,
-    ...n ? { "Content-Type": "application/json" } : {}
-  }, d = { ...r.headers ?? {} };
-  delete d.Authorization, delete d.authorization;
-  const g = {
+    Authorization: `Bearer ${n}`,
+    ...c ? { "Content-Type": "application/json" } : {}
+  }, g = { ...a.headers ?? {} };
+  delete g.Authorization, delete g.authorization;
+  const _ = {
     ...m,
-    ...d
+    ...g
   };
-  return fetch(`${s.base}${e}`, {
-    method: r.method,
-    credentials: s.credentials,
-    signal: r.signal,
-    headers: g,
-    body: n ? JSON.stringify(r.body) : void 0
+  return fetch(`${r.base}${e}`, {
+    method: a.method ?? "GET",
+    credentials: r.credentials,
+    signal: a.signal,
+    headers: _,
+    body: c ? JSON.stringify(a.body) : void 0
   });
 }
-var v = Object.defineProperty, w = Object.getOwnPropertyDescriptor, u = (t, e, r, o) => {
-  for (var s = o > 1 ? void 0 : o ? w(e, r) : e, a = t.length - 1, n; a >= 0; a--)
-    (n = t[a]) && (s = (o ? n(e, r, s) : n(s)) || s);
-  return o && s && v(e, r, s), s;
+var k = Object.defineProperty, w = Object.getOwnPropertyDescriptor, l = (t, e, a, o) => {
+  for (var r = o > 1 ? void 0 : o ? w(e, a) : e, n = t.length - 1, c; n >= 0; n--)
+    (c = t[n]) && (r = (o ? c(e, a, r) : c(r)) || r);
+  return o && r && k(e, a, r), r;
 };
-let i = class extends f {
+let i = class extends v {
   constructor() {
-    super(...arguments), this._score = null, this._comment = "", this._state = "idle", this._errorMessage = "", this._abortController = null, this._dismiss = () => {
+    super(...arguments), this._score = null, this._comment = "", this._state = "idle", this._errorMessage = "", this._runDetailState = "loading", this._runDetail = null, this._abortController = null, this._runDetailAbortController = null, this._dismiss = () => {
       this._abortController?.abort(), this._rejectModal();
     }, this._onCommentInput = (t) => {
       this._comment = t.target.value;
@@ -58,8 +58,8 @@ let i = class extends f {
       }
       this._abortController?.abort(), this._abortController = new AbortController(), this._state = "submitting", this._errorMessage = "";
       try {
-        const e = await k(
-          () => this.getContext(y),
+        const e = await b(
+          () => this.getContext(p),
           "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
           {
             method: "POST",
@@ -79,7 +79,7 @@ let i = class extends f {
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError")
           return;
-        if (e instanceof c) {
+        if (e instanceof d) {
           this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
           return;
         }
@@ -88,18 +88,54 @@ let i = class extends f {
     };
   }
   connectedCallback() {
-    super.connectedCallback(), this.closest("uui-modal-sidebar")?.setAttribute("size", "small");
+    super.connectedCallback(), this.closest("uui-modal-sidebar")?.setAttribute("size", "small"), this._loadRunDetail();
   }
   disconnectedCallback() {
-    this._abortController?.abort(), super.disconnectedCallback();
+    this._abortController?.abort(), this._runDetailAbortController?.abort(), super.disconnectedCallback();
+  }
+  async _loadRunDetail() {
+    const t = this.data?.runId ?? "";
+    if (t.length === 0) {
+      this._runDetailState = "unavailable";
+      return;
+    }
+    this._runDetailAbortController?.abort();
+    const e = new AbortController();
+    this._runDetailAbortController = e, this._runDetailState = "loading";
+    try {
+      const a = await b(
+        () => this.getContext(p),
+        `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(t)}`,
+        { signal: e.signal }
+      );
+      if (e.signal.aborted)
+        return;
+      if (!a.ok) {
+        this._runDetailState = "unavailable";
+        return;
+      }
+      const o = await a.json();
+      if (e.signal.aborted)
+        return;
+      if (!Array.isArray(o.issues) || !Array.isArray(o.suggestions)) {
+        this._runDetailState = "unavailable";
+        return;
+      }
+      this._runDetail = o, this._runDetailState = "loaded";
+    } catch (a) {
+      if (a instanceof DOMException && a.name === "AbortError" || e.signal.aborted)
+        return;
+      this._runDetailState = "unavailable";
+    }
   }
   render() {
     return this._state === "success" ? this._renderSuccess() : this._renderForm();
   }
   _renderForm() {
-    const t = this._score !== null, e = !t || this._state === "submitting", r = this._state === "submitting" ? "waiting" : void 0;
-    return l`
+    const t = this._score !== null, e = !t || this._state === "submitting", a = this._state === "submitting" ? "waiting" : void 0;
+    return s`
       <umb-body-layout headline="Run Feedback">
+        ${this._renderAgentOutput()}
         <uui-box headline="How was this run?">
           <div class="row">
             <uui-button
@@ -120,16 +156,16 @@ let i = class extends f {
             </uui-button>
           </div>
 
-          ${t ? l`<uui-textarea
+          ${t ? s`<uui-textarea
                 auto-height
                 label="Optional comment"
                 placeholder="Optional — explain why (helps the agent learn)"
                 maxlength="4000"
                 .value=${this._comment}
                 @input=${this._onCommentInput}
-              ></uui-textarea>` : b}
+              ></uui-textarea>` : u}
 
-          ${this._state === "error" ? this._renderError() : b}
+          ${this._state === "error" ? this._renderError() : u}
         </uui-box>
 
         <div slot="actions">
@@ -146,7 +182,7 @@ let i = class extends f {
             color="positive"
             label="Submit feedback"
             ?disabled=${e}
-            state=${r ?? b}
+            state=${a ?? u}
             @click=${this._submit}
           >
             Submit feedback
@@ -156,8 +192,9 @@ let i = class extends f {
     `;
   }
   _renderSuccess() {
-    return l`
+    return s`
       <umb-body-layout headline="Run Feedback">
+        ${this._renderAgentOutput()}
         <uui-box headline="Feedback recorded">
           <p role="status" class="success">Thanks — your feedback was recorded.</p>
         </uui-box>
@@ -176,7 +213,75 @@ let i = class extends f {
     `;
   }
   _renderError() {
-    return l`<p role="alert" class="error">${this._errorMessage}</p>`;
+    return s`<p role="alert" class="error">${this._errorMessage}</p>`;
+  }
+  /**
+   * Story 4.2 — DRIFT-4.1-12 closure. Renders the agent's score / flagged
+   * issues / suggestions ABOVE the existing feedback form so the editor sees
+   * what they're rating. Three states:
+   *
+   * - `loading` → `<uui-loader>` while the GET completes
+   * - `loaded`  → score + issues + suggestions rendered via Lit interpolation
+   * - `unavailable` → graceful-degradation notice ("you can still submit
+   *   feedback below"); feedback form remains usable
+   *
+   * **XSS defence pin (Story 4.2 AC6 + Story 2.3 AC9):** all agent-derived
+   * fields render via Lit's automatic template-literal HTML-encoding. The
+   * `unsafeHTML` symbol is NEVER imported in this file — static grep gate at
+   * `grep -r 'unsafeHTML' Client/src/feedback-widget/` returns zero matches.
+   */
+  _renderAgentOutput() {
+    if (this._runDetailState === "loading")
+      return s`
+        <uui-box headline="Agent output" class="agent-output-box">
+          <p class="agent-output-loading">
+            <uui-loader></uui-loader>
+            Loading agent output…
+          </p>
+        </uui-box>
+      `;
+    if (this._runDetailState === "unavailable" || this._runDetail === null)
+      return s`
+        <uui-box headline="Agent output" class="agent-output-box">
+          <p class="agent-output-unavailable">
+            Agent output unavailable; you can still submit feedback below.
+          </p>
+        </uui-box>
+      `;
+    const t = this._runDetail, e = t.issues.length > 0, a = t.suggestions.length > 0, o = t.score !== null || e || a;
+    return s`
+      <uui-box headline="Agent output" class="agent-output-box">
+        ${t.score !== null ? s`<p class="agent-output-score">
+              Score: <strong>${t.score}</strong>
+            </p>` : u}
+        ${e ? s`
+              <h5 class="agent-output-section-heading">Flagged issues</h5>
+              <ul class="agent-output-issues">
+                ${t.issues.map(
+      (r) => s`
+                    <li>
+                      <span class="agent-output-issue-text">${r.text}</span>
+                      ${r.reason ? s`<span class="agent-output-issue-reason">
+                            — ${r.reason}
+                          </span>` : u}
+                    </li>
+                  `
+    )}
+              </ul>
+            ` : u}
+        ${a ? s`
+              <h5 class="agent-output-section-heading">Suggestions</h5>
+              <ul class="agent-output-suggestions">
+                ${t.suggestions.map(
+      (r) => s`<li>${r}</li>`
+    )}
+              </ul>
+            ` : u}
+        ${o ? u : s`<p class="agent-output-empty-note">
+              (no structured output captured for this run)
+            </p>`}
+      </uui-box>
+    `;
   }
   _selectScore(t) {
     this._score = t, this._state === "error" && (this._state = "idle", this._errorMessage = "");
@@ -198,9 +303,9 @@ let i = class extends f {
           return;
         }
         if (e?.errors && typeof e.errors == "object") {
-          const r = Object.values(e.errors)[0];
-          if (Array.isArray(r) && typeof r[0] == "string") {
-            this._state = "error", this._errorMessage = r[0];
+          const a = Object.values(e.errors)[0];
+          if (Array.isArray(a) && typeof a[0] == "string") {
+            this._state = "error", this._errorMessage = a[0];
             return;
           }
         }
@@ -212,7 +317,7 @@ let i = class extends f {
     this._state = "error", this._errorMessage = "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
   }
 };
-i.styles = p`
+i.styles = f`
     :host {
       display: block;
       font-family: var(--uui-font-family);
@@ -264,23 +369,75 @@ i.styles = p`
       border-radius: var(--uui-border-radius);
       margin: var(--uui-size-space-3) 0 0;
     }
+
+    /* Story 4.2 — Agent output panel (DRIFT-4.1-12 closure).
+       Sits ABOVE the feedback form so the editor sees what they're rating. */
+    .agent-output-box {
+      display: block;
+      margin-bottom: var(--uui-size-space-4);
+    }
+
+    .agent-output-loading,
+    .agent-output-unavailable,
+    .agent-output-empty-note {
+      margin: 0;
+      color: var(--uui-color-text-alt);
+      font-style: italic;
+    }
+
+    .agent-output-loading {
+      display: flex;
+      align-items: center;
+      gap: var(--uui-size-space-2);
+    }
+
+    .agent-output-score {
+      margin: 0 0 var(--uui-size-space-3) 0;
+    }
+
+    .agent-output-section-heading {
+      margin: var(--uui-size-space-3) 0 var(--uui-size-space-2) 0;
+      font-size: var(--uui-type-h5-size, 1rem);
+      font-weight: 600;
+    }
+
+    .agent-output-issues,
+    .agent-output-suggestions {
+      margin: 0 0 var(--uui-size-space-2) 0;
+      padding-left: var(--uui-size-space-5);
+    }
+
+    .agent-output-issues li,
+    .agent-output-suggestions li {
+      margin-bottom: var(--uui-size-space-1);
+    }
+
+    .agent-output-issue-reason {
+      color: var(--uui-color-text-alt);
+    }
   `;
-u([
+l([
   h()
 ], i.prototype, "_score", 2);
-u([
+l([
   h()
 ], i.prototype, "_comment", 2);
-u([
+l([
   h()
 ], i.prototype, "_state", 2);
-u([
+l([
   h()
 ], i.prototype, "_errorMessage", 2);
-i = u([
-  _("cogworks-agent-feedback")
+l([
+  h()
+], i.prototype, "_runDetailState", 2);
+l([
+  h()
+], i.prototype, "_runDetail", 2);
+i = l([
+  y("cogworks-agent-feedback")
 ], i);
-const T = [
+const $ = [
   {
     type: "modal",
     alias: "Ua.Modal.RunDetail",
@@ -290,6 +447,6 @@ const T = [
   }
 ];
 export {
-  T as manifests
+  $ as manifests
 };
 //# sourceMappingURL=cogworks-umbracoai-agentmemory.js.map

@@ -20,6 +20,25 @@ type AgentFeedbackModalData = {
 
 type ScoreString = "ThumbsUp" | "ThumbsDown";
 type WidgetState = "idle" | "submitting" | "success" | "error";
+type RunDetailState = "loading" | "loaded" | "unavailable";
+
+/**
+ * Shape of the GET /umbraco/management/api/v1/cogworks-agent-memory/runs/{runId}
+ * response — projected from `AgentRunRecord.ResponseSnapshotJoined` parsed as
+ * the Brand Voice Auditor agent's structured-output schema (Story 4.1 AC3).
+ * Story 4.2 closes DRIFT-4.1-12 by rendering this above the feedback form so
+ * the editor sees what they're rating.
+ */
+type AgentRunDetail = {
+  runId: string;
+  agentId: string;
+  agentDisplayName: string | null;
+  contentNodeName: string | null;
+  ranAtUtc: string;
+  score: number | null;
+  issues: { text: string; reason: string | null }[];
+  suggestions: string[];
+};
 
 /**
  * Story 2.3 — inline feedback widget for an agent run.
@@ -54,8 +73,11 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   @state() private _comment = "";
   @state() private _state: WidgetState = "idle";
   @state() private _errorMessage = "";
+  @state() private _runDetailState: RunDetailState = "loading";
+  @state() private _runDetail: AgentRunDetail | null = null;
 
   private _abortController: AbortController | null = null;
+  private _runDetailAbortController: AbortController | null = null;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -69,11 +91,90 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     // medium still rendered too large; the comment textarea's auto-height
     // growth still fits cleanly within the small frame.
     this.closest("uui-modal-sidebar")?.setAttribute("size", "small");
+
+    // Story 4.2 — DRIFT-4.1-12 closure. Fetch the run's agent output so the
+    // editor sees score / issues / suggestions before thumbing. Fire-and-forget
+    // promise; render reacts via @state. Graceful degradation on any failure
+    // (404, network error, parse failure) — the feedback form still works.
+    void this._loadRunDetail();
   }
 
   override disconnectedCallback() {
     this._abortController?.abort();
+    this._runDetailAbortController?.abort();
     super.disconnectedCallback();
+  }
+
+  private async _loadRunDetail() {
+    const runId = this.data?.runId ?? "";
+    if (runId.length === 0) {
+      // Bellissima/Strategy-B contract violation already surfaced by _submit;
+      // don't double-error here. Just mark the agent-output panel unavailable.
+      this._runDetailState = "unavailable";
+      return;
+    }
+
+    this._runDetailAbortController?.abort();
+    // Capture the controller locally so post-await guards check the SAME
+    // controller's signal — concurrent re-entry would reassign the field
+    // before the prior fetch resolves, stranding stale data otherwise.
+    // Story 4.2 § Review Findings patch #7 (race) + patch #2 (abort-during-
+    // json) + patch #8 (shape-mismatch defensive guard).
+    const controller = new AbortController();
+    this._runDetailAbortController = controller;
+    this._runDetailState = "loading";
+
+    try {
+      const response = await authenticatedFetch(
+        () => this.getContext(UMB_AUTH_CONTEXT),
+        `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(runId)}`,
+        { signal: controller.signal },
+      );
+      // If the controller has been aborted (component disconnected, or a
+      // concurrent _loadRunDetail invocation has superseded us), bail out
+      // silently rather than mutating @state on a stale or disconnected element.
+      if (controller.signal.aborted) {
+        return;
+      }
+      if (!response.ok) {
+        // 404 / 500 / any non-2xx → graceful degradation. The feedback form
+        // remains usable; the agent-output panel surfaces the unavailable
+        // notice.
+        this._runDetailState = "unavailable";
+        return;
+      }
+      const body = (await response.json()) as AgentRunDetail;
+      if (controller.signal.aborted) {
+        return;
+      }
+      // Defensive shape guard — if the server returns a 200 with a structure
+      // that doesn't match AgentRunDetail (e.g., a ProblemDetails body shipped
+      // accidentally, or an adopter-deployed proxy rewrites the response),
+      // treat as unavailable rather than crashing the render path later.
+      if (!Array.isArray(body.issues) || !Array.isArray(body.suggestions)) {
+        this._runDetailState = "unavailable";
+        return;
+      }
+      this._runDetail = body;
+      this._runDetailState = "loaded";
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Editor navigated away mid-fetch; don't surface anything.
+        return;
+      }
+      // `response.json()` mid-stream abort throws a `TypeError` (not an
+      // `AbortError`) per the fetch spec — so the AbortError catch above
+      // doesn't cover that case. Check the controller's signal explicitly:
+      // if we're aborted, the editor navigated away after the fetch resolved
+      // but before the body finished streaming — silently bail.
+      if (controller.signal.aborted) {
+        return;
+      }
+      // AuthContextUnavailableError, network error, JSON parse failure — all
+      // converge on the same UX: the agent-output panel marks unavailable;
+      // the feedback form is still rendered.
+      this._runDetailState = "unavailable";
+    }
   }
 
   override render() {
@@ -96,6 +197,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     // Cancel button + Esc + backdrop click are the canonical dismissal paths.
     return html`
       <umb-body-layout headline="Run Feedback">
+        ${this._renderAgentOutput()}
         <uui-box headline="How was this run?">
           <div class="row">
             <uui-button
@@ -157,6 +259,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   private _renderSuccess() {
     return html`
       <umb-body-layout headline="Run Feedback">
+        ${this._renderAgentOutput()}
         <uui-box headline="Feedback recorded">
           <p role="status" class="success">Thanks — your feedback was recorded.</p>
         </uui-box>
@@ -179,6 +282,94 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     // Lit auto-encodes the template-literal interpolation — _errorMessage
     // renders as text, NEVER as HTML (Story 2.3 AC9 XSS-defence contract).
     return html`<p role="alert" class="error">${this._errorMessage}</p>`;
+  }
+
+  /**
+   * Story 4.2 — DRIFT-4.1-12 closure. Renders the agent's score / flagged
+   * issues / suggestions ABOVE the existing feedback form so the editor sees
+   * what they're rating. Three states:
+   *
+   * - `loading` → `<uui-loader>` while the GET completes
+   * - `loaded`  → score + issues + suggestions rendered via Lit interpolation
+   * - `unavailable` → graceful-degradation notice ("you can still submit
+   *   feedback below"); feedback form remains usable
+   *
+   * **XSS defence pin (Story 4.2 AC6 + Story 2.3 AC9):** all agent-derived
+   * fields render via Lit's automatic template-literal HTML-encoding. The
+   * `unsafeHTML` symbol is NEVER imported in this file — static grep gate at
+   * `grep -r 'unsafeHTML' Client/src/feedback-widget/` returns zero matches.
+   */
+  private _renderAgentOutput() {
+    if (this._runDetailState === "loading") {
+      return html`
+        <uui-box headline="Agent output" class="agent-output-box">
+          <p class="agent-output-loading">
+            <uui-loader></uui-loader>
+            Loading agent output…
+          </p>
+        </uui-box>
+      `;
+    }
+
+    if (this._runDetailState === "unavailable" || this._runDetail === null) {
+      return html`
+        <uui-box headline="Agent output" class="agent-output-box">
+          <p class="agent-output-unavailable">
+            Agent output unavailable; you can still submit feedback below.
+          </p>
+        </uui-box>
+      `;
+    }
+
+    const detail = this._runDetail;
+    const hasIssues = detail.issues.length > 0;
+    const hasSuggestions = detail.suggestions.length > 0;
+    const hasStructuredOutput =
+      detail.score !== null || hasIssues || hasSuggestions;
+
+    return html`
+      <uui-box headline="Agent output" class="agent-output-box">
+        ${detail.score !== null
+          ? html`<p class="agent-output-score">
+              Score: <strong>${detail.score}</strong>
+            </p>`
+          : nothing}
+        ${hasIssues
+          ? html`
+              <h5 class="agent-output-section-heading">Flagged issues</h5>
+              <ul class="agent-output-issues">
+                ${detail.issues.map(
+                  (issue) => html`
+                    <li>
+                      <span class="agent-output-issue-text">${issue.text}</span>
+                      ${issue.reason
+                        ? html`<span class="agent-output-issue-reason">
+                            — ${issue.reason}
+                          </span>`
+                        : nothing}
+                    </li>
+                  `,
+                )}
+              </ul>
+            `
+          : nothing}
+        ${hasSuggestions
+          ? html`
+              <h5 class="agent-output-section-heading">Suggestions</h5>
+              <ul class="agent-output-suggestions">
+                ${detail.suggestions.map(
+                  (suggestion) => html`<li>${suggestion}</li>`,
+                )}
+              </ul>
+            `
+          : nothing}
+        ${!hasStructuredOutput
+          ? html`<p class="agent-output-empty-note">
+              (no structured output captured for this run)
+            </p>`
+          : nothing}
+      </uui-box>
+    `;
   }
 
   private _dismiss = () => {
@@ -377,6 +568,52 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       color: var(--uui-color-danger-contrast);
       border-radius: var(--uui-border-radius);
       margin: var(--uui-size-space-3) 0 0;
+    }
+
+    /* Story 4.2 — Agent output panel (DRIFT-4.1-12 closure).
+       Sits ABOVE the feedback form so the editor sees what they're rating. */
+    .agent-output-box {
+      display: block;
+      margin-bottom: var(--uui-size-space-4);
+    }
+
+    .agent-output-loading,
+    .agent-output-unavailable,
+    .agent-output-empty-note {
+      margin: 0;
+      color: var(--uui-color-text-alt);
+      font-style: italic;
+    }
+
+    .agent-output-loading {
+      display: flex;
+      align-items: center;
+      gap: var(--uui-size-space-2);
+    }
+
+    .agent-output-score {
+      margin: 0 0 var(--uui-size-space-3) 0;
+    }
+
+    .agent-output-section-heading {
+      margin: var(--uui-size-space-3) 0 var(--uui-size-space-2) 0;
+      font-size: var(--uui-type-h5-size, 1rem);
+      font-weight: 600;
+    }
+
+    .agent-output-issues,
+    .agent-output-suggestions {
+      margin: 0 0 var(--uui-size-space-2) 0;
+      padding-left: var(--uui-size-space-5);
+    }
+
+    .agent-output-issues li,
+    .agent-output-suggestions li {
+      margin-bottom: var(--uui-size-space-1);
+    }
+
+    .agent-output-issue-reason {
+      color: var(--uui-color-text-alt);
     }
   `;
 }

@@ -203,9 +203,10 @@ public class FeedbackIndexerTests
         await _indexer.IndexAsync(DefaultRunId, _agentId, CancellationToken.None);
 
         // Embedding called once with the joined digest text.
+        // Segment order is Comment → Response → Prompt per AR35 / Story 4.2.
         await _embeddingService.Received(1).GenerateEmbeddingAsync(
             Arg.Any<Action<AIEmbeddingBuilder>>(),
-            "[user] hello\n\n[assistant] hi\n\nlooks good",
+            "looks good\n\n[assistant] hi\n\n[user] hello",
             Arg.Any<CancellationToken>());
 
         // Vector store called with the right index alias + culture null + chunk 0 + metadata.
@@ -266,9 +267,54 @@ public class FeedbackIndexerTests
 
         await _indexer.IndexAsync(DefaultRunId, _agentId, CancellationToken.None);
 
+        // Comment null ⇒ digest = Response \n\n Prompt (segment order
+        // Comment → Response → Prompt; null comment segment skipped) per
+        // AR35 / Story 4.2.
         await _embeddingService.Received(1).GenerateEmbeddingAsync(
             Arg.Any<Action<AIEmbeddingBuilder>>(),
-            "[user] hello\n\n[assistant] hi",
+            "[assistant] hi\n\n[user] hello",
+            Arg.Any<CancellationToken>());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // AC2 — realistic editorial content under truncation (AR35 / Story 4.2)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Test]
+    public async Task IndexAsync_RealisticEditorialContent_DigestRetainsCommentVerbatimUnderTruncation()
+    {
+        // Setup mirrors Adam's Story 4.1 manual gate dry-run shape: ~3 KB
+        // prompt + ~2 KB response + ~400-char editorial brand-voice comment.
+        // Pre-AR35 (Prompt → Response → Comment order), the comment chopped
+        // entirely. Post-AR35 (Comment → Response → Prompt), the comment
+        // survives at the head of the digest verbatim.
+        var prompt = new string('P', 3000);
+        var response = new string('R', 2000);
+        const string comment =
+            "These are intentional Northwind Trails brand idioms, do not flag: " +
+            "'the wild calling', 'feet on the ground', 'the long way home'. " +
+            "Brand guideline: regional idioms like these are part of the voice, " +
+            "not breaches per guideline #6. Please weight editorial-tone " +
+            "guidelines below the explicit brand-voice register clause from " +
+            "section 6 of the Northwind Trails style guide.";
+
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(new[]
+            {
+                MakeRun(prompt: prompt, response: response),
+            }));
+        _feedbackService.GetFeedbackForRunAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunFeedback>>(new[]
+            {
+                MakeFeedback(comment),
+            }));
+
+        await _indexer.IndexAsync(DefaultRunId, _agentId, CancellationToken.None);
+
+        await _repository.Received(1).AddAsync(
+            Arg.Is<MemoryEntryEntity>(e =>
+                e.DigestText.Length == 500
+                && e.DigestText.StartsWith(comment)),
             Arg.Any<CancellationToken>());
     }
 
@@ -303,9 +349,11 @@ public class FeedbackIndexerTests
 
         await _indexer.IndexAsync(DefaultRunId, _agentId, CancellationToken.None);
 
+        // Comment → Response → Prompt segment order per AR35 / Story 4.2;
+        // runs[0] = first record (most-recent per StartedUtc DESC convention).
         await _embeddingService.Received(1).GenerateEmbeddingAsync(
             Arg.Any<Action<AIEmbeddingBuilder>>(),
-            "[user] first\n\n[assistant] first\n\nlooks good",
+            "looks good\n\n[assistant] first\n\n[user] first",
             Arg.Any<CancellationToken>());
     }
 
@@ -541,10 +589,11 @@ public class FeedbackIndexerTests
 
         await _indexer.IndexAsync(DefaultRunId, _agentId, CancellationToken.None);
 
+        // Comment → Response → Prompt segment order per AR35 / Story 4.2.
         await _repository.Received(1).UpdateAsync(
             Arg.Is<MemoryEntryEntity>(e =>
                 e.Id == existingId
-                && e.DigestText == "[user] hello\n\n[assistant] hi\n\nlooks good"
+                && e.DigestText == "looks good\n\n[assistant] hi\n\n[user] hello"
                 && e.EmbeddingRef != "stale-doc"
                 && e.IndexingStatus == (int)IndexingStatus.Embedded),
             Arg.Any<CancellationToken>());
@@ -562,8 +611,10 @@ public class FeedbackIndexerTests
 
         await _indexer.IndexAsync(DefaultRunId, _agentId, CancellationToken.None);
 
+        // Comment now leads the digest per AR35 / Story 4.2 (was EndsWith
+        // pre-AR35; comment trailed prompt + response under old segment order).
         await _repository.Received(1).AddAsync(
-            Arg.Is<MemoryEntryEntity>(e => e.DigestText.EndsWith("sarah's comment")),
+            Arg.Is<MemoryEntryEntity>(e => e.DigestText.StartsWith("sarah's comment")),
             Arg.Any<CancellationToken>());
     }
 

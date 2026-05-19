@@ -297,12 +297,49 @@ internal sealed class FeedbackIndexer : IFeedbackIndexer
         }
     }
 
+    /// <summary>
+    /// Joins the editor's <paramref name="comment"/>, the agent's
+    /// <see cref="AgentRunRecord.ResponseSnapshotJoined"/>, and the original
+    /// <see cref="AgentRunRecord.PromptSnapshotJoined"/> into one digest blob
+    /// for embedding + storage on the memory entry row.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Segment order (AR35, ratified 2026-05-19; Story 4.2):</b>
+    /// <c>Comment → ResponseSnapshotJoined → PromptSnapshotJoined</c> joined
+    /// with <c>"\n\n"</c>, then truncated to <paramref name="maxChars"/>. Null
+    /// or whitespace segments are skipped before the join.
+    /// </para>
+    /// <para>
+    /// The order is information-density-descending so the editor's teaching
+    /// signal survives truncation. The comment carries the explicit editor
+    /// disagreement; the response carries the agent's reasoning artefact; the
+    /// prompt is the LEAST important to preserve under truncation because the
+    /// agent already saw it natively in the original run and re-reading the
+    /// truncated prefix doesn't help the agent in Run 2.
+    /// </para>
+    /// <para>
+    /// Empirical evidence: Story 3.1's original Prompt → Response → Comment
+    /// order under the default 500-char <c>DigestMaxChars</c> budget chopped
+    /// the comment off entirely for realistic editorial content (~3 KB prompt
+    /// + ~2.6 KB response + ~400 char comment), breaking FR44 semantically.
+    /// See <c>4-2-fr44-demo-critical-fixes-digest-widget-render.md</c> § AC1
+    /// + AR35 in <c>epics.md</c> § Additional Requirements for the rationale.
+    /// </para>
+    /// <para>
+    /// <b>Edge case:</b> when <paramref name="comment"/> itself exceeds
+    /// <paramref name="maxChars"/>, the comment truncates at the cap; the
+    /// response and prompt drop out entirely. Acceptable for v0.1 — editorial
+    /// brand-voice comments in the demo corpus are typically &lt; 400 chars.
+    /// v0.2 LLM-based digest (post-Codegarden) addresses the scale ceiling.
+    /// </para>
+    /// </remarks>
     private static string BuildDigest(AgentRunRecord run, string? comment, int maxChars)
     {
         var segments = new List<string>(3);
-        if (!string.IsNullOrWhiteSpace(run.PromptSnapshotJoined)) segments.Add(run.PromptSnapshotJoined);
-        if (!string.IsNullOrWhiteSpace(run.ResponseSnapshotJoined)) segments.Add(run.ResponseSnapshotJoined);
         if (!string.IsNullOrWhiteSpace(comment)) segments.Add(comment!);
+        if (!string.IsNullOrWhiteSpace(run.ResponseSnapshotJoined)) segments.Add(run.ResponseSnapshotJoined);
+        if (!string.IsNullOrWhiteSpace(run.PromptSnapshotJoined)) segments.Add(run.PromptSnapshotJoined);
         var joined = string.Join("\n\n", segments);
         return joined.Length > maxChars && maxChars > 0
             ? joined.Substring(0, maxChars)
