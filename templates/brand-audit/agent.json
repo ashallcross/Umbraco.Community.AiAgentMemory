@@ -1,0 +1,43 @@
+{
+  "alias": "brand-voice-auditor",
+  "name": "Brand Voice Auditor",
+  "description": "Audits an article body against brand-voice guidelines; flags off-voice passages with reasons + suggestions.",
+  "agentType": "standard",
+  "profileId": null,
+  "guardrailIds": [],
+  "surfaceIds": ["copilot", "automations"],
+  "scope": null,
+  "config": {
+    "$type": "standard",
+    "contextIds": [],
+    "instructions": "You audit article body text against brand-voice guidelines and respond with structured JSON conforming to the schema. Brand-voice guidelines (one-page reference): (1) Write in plain UK English; avoid US-specific spellings (organize → organise, color → colour). (2) Prefer active voice over passive. (3) Avoid hedge words (\"may\", \"might\", \"could\") in factual claims — be direct. (4) Sentences should average ≤25 words. (5) Avoid jargon unless it has been defined earlier in the article. (6) Flag any colloquialism or informal phrasing that may not suit a professional editorial voice. For each off-voice passage, return: text (the exact substring), reason (which guideline #N it violates, in one short sentence). For each remediation, return a single short rewrite suggestion. Score: 10 = perfectly on-voice; 7 = minor issues; 4 = several breaches; 1 = consistently off-voice.\n",
+    "allowedToolIds": [],
+    "allowedToolScopeIds": [],
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "score": {
+          "type": "number",
+          "description": "Overall brand-voice score in [0,10]. 10 = perfectly on-voice."
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" },
+              "reason": { "type": "string" }
+            },
+            "required": ["text", "reason"]
+          }
+        },
+        "suggestions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["score", "issues", "suggestions"]
+    },
+    "userGroupPermissions": {}
+  }
+}

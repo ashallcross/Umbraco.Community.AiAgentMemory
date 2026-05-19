@@ -475,6 +475,9 @@ umbraco-package-schema.json
 /umbraco/Data/*.sqlite.db-shm
 /umbraco/Data/*.sqlite.db-wal
 
+# Manual-gate DB backups (dev-time rollback snapshots; never committed)
+/_backups/
+
 # Log files
 /umbraco/Logs/
 

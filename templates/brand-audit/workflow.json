@@ -1,0 +1,129 @@
+{
+  "automation": {
+    "alias": "brand-voice-audit-demo",
+    "name": "Brand Voice Audit Demo",
+    "description": "Audits an article body against the Brand Voice Auditor's guidelines. Run 1 (no memory) flags brand idioms as false positives; Run 2 (with memory) suppresses them after editor feedback.",
+    "canvasState": "{\"viewport\":{\"x\":729.0131245210425,\"y\":195.42328721272895,\"zoom\":0.758297704126351},\"triggerPosition\":{\"x\":206.4705882352941,\"y\":-165.29411764705884}}",
+    "notificationSettings": null,
+    "trigger": {
+      "triggerAlias": "umbracoAutomate.manual",
+      "settings": {}
+    },
+    "steps": [
+      {
+        "id": "a5dcc1b1-e467-4e7b-94e9-d252d4648862",
+        "actionAlias": "umbracoAutomate.getContent",
+        "alias": "getContent",
+        "name": "Get Content",
+        "connectionAlias": null,
+        "errorBehavior": "Terminate",
+        "inputMappings": {},
+        "maxRetries": null,
+        "retryInterval": null,
+        "position": {
+          "x": 181.76470588235293,
+          "y": -11.176470588235311
+        },
+        "settings": {
+          "contentKey": "367684d2-f255-4bc8-9e09-4f19f3b90f86",
+          "culture": null
+        }
+      },
+      {
+        "id": "ecf31003-de59-4f1a-9c58-32b54ec33f2d",
+        "actionAlias": "umbracoAI.runAgent",
+        "alias": "runAgent",
+        "name": "Run AI Agent",
+        "connectionAlias": null,
+        "errorBehavior": "Terminate",
+        "inputMappings": {},
+        "maxRetries": null,
+        "retryInterval": null,
+        "position": {
+          "x": 185.29411764705878,
+          "y": 175.88235294117646
+        },
+        "settings": {
+          "agentId": "3cf62a06-3fd0-4d67-8b46-e3d3087aea83",
+          "message": "${ steps.getContent.properties.contentRows[0].content.content | stripHtml }"
+        }
+      },
+      {
+        "id": "7365edae-1962-4379-a6a7-dafbb8f426b2",
+        "actionAlias": "umbracoAutomate.notifyEditor",
+        "alias": "notifyEditor",
+        "name": "Notify Editor",
+        "connectionAlias": null,
+        "errorBehavior": "Terminate",
+        "inputMappings": {},
+        "maxRetries": null,
+        "retryInterval": null,
+        "position": {
+          "x": 185.29411764705878,
+          "y": 355.88235294117646
+        },
+        "settings": {
+          "contentKey": "${ steps.getContent.contentKey }",
+          "title": "Brand voice audit complete",
+          "message": "The Brand Voice Auditor has reviewed this article. Open the Run Detail panel to see flagged passages and submit feedback.",
+          "severity": "Default"
+        }
+      },
+      {
+        "id": "4892c5fa-0e51-4909-9cbb-cd62ef31f542",
+        "actionAlias": "umbracoAutomate.logMessage",
+        "alias": "logMessage",
+        "name": "Log Message",
+        "connectionAlias": null,
+        "errorBehavior": "Terminate",
+        "inputMappings": {},
+        "maxRetries": null,
+        "retryInterval": null,
+        "position": {
+          "x": 185.29411764705878,
+          "y": 535.8823529411765
+        },
+        "settings": {
+          "message": "Brand voice audit run completed for content ${ trigger.contentKey }",
+          "logLevel": "Information"
+        }
+      }
+    ],
+    "connections": [
+      {
+        "sourceStepId": "00000000-0000-0000-0000-000000000000",
+        "targetStepId": "a5dcc1b1-e467-4e7b-94e9-d252d4648862",
+        "sourceHandle": null,
+        "targetHandle": null,
+        "filter": null,
+        "outcome": null
+      },
+      {
+        "sourceStepId": "a5dcc1b1-e467-4e7b-94e9-d252d4648862",
+        "targetStepId": "ecf31003-de59-4f1a-9c58-32b54ec33f2d",
+        "sourceHandle": null,
+        "targetHandle": null,
+        "filter": null,
+        "outcome": null
+      },
+      {
+        "sourceStepId": "ecf31003-de59-4f1a-9c58-32b54ec33f2d",
+        "targetStepId": "7365edae-1962-4379-a6a7-dafbb8f426b2",
+        "sourceHandle": null,
+        "targetHandle": null,
+        "filter": null,
+        "outcome": null
+      },
+      {
+        "sourceStepId": "7365edae-1962-4379-a6a7-dafbb8f426b2",
+        "targetStepId": "4892c5fa-0e51-4909-9cbb-cd62ef31f542",
+        "sourceHandle": null,
+        "targetHandle": null,
+        "filter": null,
+        "outcome": null
+      }
+    ]
+  },
+  "connectionReferences": [],
+  "formatVersion": "1.0"
+}
