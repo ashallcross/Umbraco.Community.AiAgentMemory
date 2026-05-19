@@ -6,6 +6,7 @@ using Cogworks.UmbracoAI.AgentMemory.Middleware;
 using Cogworks.UmbracoAI.AgentMemory.Persistence;
 using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
 using Cogworks.UmbracoAI.AgentMemory.Runs;
+using Cogworks.UmbracoAI.AgentMemory.Web.Api;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -352,6 +353,24 @@ public class AgentMemoryComposerStartupValidationTests
     }
 
     [Test]
+    public void Compose_RegistersBackofficeOperationIdHandlerForAllPackageControllers()
+    {
+        var handlerType = typeof(AgentMemoryBackofficeApiComposer)
+            .GetNestedType("AgentMemoryOperationIdHandler", System.Reflection.BindingFlags.NonPublic);
+        Assert.That(handlerType, Is.Not.Null);
+        var field = handlerType!.GetField(
+            "AllowedControllers",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.That(field, Is.Not.Null);
+        var allowedControllers = (Type[])field!.GetValue(null)!;
+
+        Assert.That(allowedControllers, Does.Contain(typeof(AgentFeedbackController)));
+        Assert.That(allowedControllers, Does.Contain(typeof(AgentRunReadController)),
+            "New Management-API controllers must be added to the operation-id allow-list "
+            + "or Swagger generation falls back to the framework's default operation ids.");
+    }
+
+    [Test]
     public void Compose_StartupValidation_BackofficeApi_NoCaptiveDependency()
     {
         // Story 2.2 captive-dep check after composing both composers together.
@@ -378,6 +397,23 @@ public class AgentMemoryComposerStartupValidationTests
             "Story 2.2 must not introduce a Singleton consuming a Scoped repository — "
             + "AgentMemoryBackofficeApiComposer's IOperationIdHandler is Singleton with "
             + "only Singleton deps (IOptions<ApiVersioningOptions>).");
+    }
+
+    [Test]
+    public void Compose_StartupValidation_AgentRunReadController_NoCaptiveDependency()
+    {
+        var ctorParams = typeof(AgentRunReadController).GetConstructors()
+            .Single()
+            .GetParameters();
+
+        Assert.That(ctorParams, Has.None.Matches<System.Reflection.ParameterInfo>(p =>
+            p.ParameterType == typeof(EFCoreAgentRunFeedbackRepository)
+            || p.ParameterType == typeof(EFCoreMemoryEntryRepository)
+            || p.ParameterType == typeof(IMemoryEntryRepository)
+            || (p.ParameterType.IsGenericType
+                && p.ParameterType.GetGenericTypeDefinition() == typeof(IEFCoreScopeProvider<>))),
+            "AgentRunReadController must not directly depend on Scoped repositories or "
+            + "IEFCoreScopeProvider<>; it composes only on IAgentRunReader + ILogger.");
     }
 
     [Test]

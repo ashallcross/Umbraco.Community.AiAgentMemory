@@ -45,9 +45,9 @@ namespace Cogworks.UmbracoAI.AgentMemory.Web.Api;
 /// per-call RunId). The controller invokes
 /// <see cref="IAgentRunReader.GetRunsForThreadAsync"/> + picks the first
 /// record (most-recent per <c>StartedUtc DESC</c> convention — matches
-/// <see cref="AgentFeedbackController"/>'s v0.1 single-agent attribution). The
-/// 404 response copy is verbatim from <see cref="AgentFeedbackController"/>'s
-/// equivalent branch for adopter-error-message parity.
+    /// <see cref="AgentFeedbackController"/>'s v0.1 single-agent attribution). The
+    /// 404 response copy keeps the same adopter-facing recovery instruction as
+    /// <see cref="AgentFeedbackController"/>'s equivalent branch.
 /// </para>
 /// <para>
 /// <b>Graceful degradation (NFR-R1):</b> if the matched record's
@@ -106,7 +106,7 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
         string runId,
         CancellationToken cancellationToken)
     {
-        if (runId is null || runId.Length == 0)
+        if (string.IsNullOrWhiteSpace(runId))
         {
             return Problem(
                 title: "Invalid run identifier.",
@@ -198,7 +198,7 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
     /// </para>
     /// </remarks>
     private const string AssistantTag = "[assistant]";
-    private const string AssistantTagWithBrace = "[assistant] {";
+    private const char JsonObjectStart = '{';
 
     private static (int? score, IReadOnlyList<AgentRunDetailIssue> issues, IReadOnlyList<string> suggestions)
         TryParseStructuredOutput(string? responseSnapshotJoined)
@@ -208,28 +208,14 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
             return (null, Array.Empty<AgentRunDetailIssue>(), Array.Empty<string>());
         }
 
-        // DRIFT-4.2-impl-2: locate the last [assistant] marker and parse the
-        // JSON payload that follows. Tool-using turns interleave
-        // [tool_call:...] and [tool:...] lines BEFORE the final [assistant]
-        // line; we want the structured output from the final turn only.
-        //
-        // Code-review hardening (Story 4.2 § Review Findings patch #1): anchor
-        // on the literal "[assistant] {" boundary (tag + space + opening
-        // brace) rather than the bare tag. The bare-tag form was vulnerable
-        // to false matches when the agent's own JSON string content quoted
-        // "[assistant]" (e.g., the agent describing its role in an `issues`
-        // entry) — `LastIndexOf` would land on the inner occurrence, leaving
-        // `jsonStart` mid-string-literal and the parse would throw. The
-        // tag-plus-brace form is the unique transcript-to-JSON boundary
-        // shape; collisions inside JSON string values would require the
-        // agent to literally emit "[assistant] {" inside a quoted string,
-        // which is sufficiently improbable to be acceptable for v0.1.
-        var assistantIdx = responseSnapshotJoined.LastIndexOf(AssistantTagWithBrace, StringComparison.Ordinal);
-        var jsonStart = assistantIdx >= 0
-            ? assistantIdx + AssistantTag.Length // advance past "[assistant]" but keep the "{" for the parser
-            : 0; // fall back to whole-document parse if no marker (preserves
-                 // future-proof seam for non-transcript ResponseSnapshot shapes
-                 // adopter agents might produce).
+        // DRIFT-4.2-impl-2: locate the final transcript line whose assistant
+        // marker is followed by optional whitespace and a JSON object. Tool-using
+        // turns interleave [tool_call:...] and [tool:...] lines before the final
+        // [assistant] line; we want the structured output from the final turn
+        // only. Matching the marker only at a line boundary avoids false matches
+        // inside JSON string values; accepting whitespace/newline before the
+        // opening brace handles valid transcript formatting variants.
+        var jsonStart = FindAssistantJsonStart(responseSnapshotJoined);
         var jsonPayload = responseSnapshotJoined.Substring(jsonStart).TrimStart();
 
         if (string.IsNullOrWhiteSpace(jsonPayload))
@@ -262,7 +248,12 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
                 }
                 else if (scoreEl.TryGetDouble(out var d))
                 {
-                    score = (int)Math.Round(d);
+                    score = (int)Math.Round(d, MidpointRounding.AwayFromZero);
+                }
+
+                if (score is < 1 or > 10)
+                {
+                    score = null;
                 }
             }
 
@@ -277,6 +268,63 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
             // fields. The widget treats this as "Agent output unavailable".
             return (null, Array.Empty<AgentRunDetailIssue>(), Array.Empty<string>());
         }
+    }
+
+    private static int FindAssistantJsonStart(string responseSnapshotJoined)
+    {
+        var searchStart = responseSnapshotJoined.Length - 1;
+        while (searchStart >= 0)
+        {
+            var assistantIdx = responseSnapshotJoined.LastIndexOf(
+                AssistantTag,
+                searchStart,
+                StringComparison.Ordinal);
+            if (assistantIdx < 0)
+            {
+                break;
+            }
+
+            if (IsTranscriptLineBoundary(responseSnapshotJoined, assistantIdx))
+            {
+                var scan = assistantIdx + AssistantTag.Length;
+                while (scan < responseSnapshotJoined.Length
+                       && char.IsWhiteSpace(responseSnapshotJoined[scan]))
+                {
+                    scan++;
+                }
+
+                if (scan < responseSnapshotJoined.Length
+                    && responseSnapshotJoined[scan] == JsonObjectStart)
+                {
+                    return scan;
+                }
+            }
+
+            searchStart = assistantIdx - 1;
+        }
+
+        // Fall back to whole-document parse if no transcript marker is found.
+        // This preserves the future-proof seam for non-transcript
+        // ResponseSnapshot shapes adopter agents might produce.
+        return 0;
+    }
+
+    private static bool IsTranscriptLineBoundary(string value, int markerIndex)
+    {
+        for (var i = markerIndex - 1; i >= 0; i--)
+        {
+            var c = value[i];
+            if (c is '\n' or '\r')
+            {
+                return true;
+            }
+            if (!char.IsWhiteSpace(c))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static IReadOnlyList<AgentRunDetailIssue> ParseIssues(JsonElement root)

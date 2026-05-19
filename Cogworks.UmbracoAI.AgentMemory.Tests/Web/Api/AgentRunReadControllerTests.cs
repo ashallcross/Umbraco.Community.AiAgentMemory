@@ -149,6 +149,19 @@ public class AgentRunReadControllerTests
         await _runReader.DidNotReceiveWithAnyArgs().GetRunsForThreadAsync(default!, default);
     }
 
+    [Test]
+    public async Task GetAsync_RunIdWhitespaceOnly_Returns400ProblemDetails()
+    {
+        var result = await _controller.GetAsync("   ", CancellationToken.None);
+
+        var objectResult = result as ObjectResult;
+        Assert.That(objectResult, Is.Not.Null);
+        Assert.That(objectResult!.StatusCode, Is.EqualTo(400));
+        var problem = (ProblemDetails)objectResult.Value!;
+        Assert.That(problem.Detail, Does.Contain("cannot be empty"));
+        await _runReader.DidNotReceiveWithAnyArgs().GetRunsForThreadAsync(default!, default);
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // AC4 (post-review patch #3) — score emitted as decimal-number is parsed
     // ─────────────────────────────────────────────────────────────────────
@@ -168,7 +181,24 @@ public class AgentRunReadControllerTests
 
         var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
         Assert.That(response, Is.Not.Null);
-        Assert.That(response!.Score, Is.EqualTo(8), "7.5 rounds to 8 (Math.Round banker's rounding).");
+        Assert.That(response!.Score, Is.EqualTo(8), "7.5 rounds to 8.");
+    }
+
+    [TestCase(0)]
+    [TestCase(11)]
+    [TestCase(-1)]
+    public async Task GetAsync_ScoreOutsideBrandVoiceRange_ReturnsNullScore(int score)
+    {
+        var responseJson = $$"""[assistant] {"score":{{score}},"issues":[{"text":"x"}],"suggestions":["s"]}""";
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseJson) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.That(response!.Score, Is.Null);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -233,8 +263,8 @@ public class AgentRunReadControllerTests
     {
         // Empirical shape observed at Story 4.2 manual gate dry-run 2026-05-19
         // against Run ID 347c2071. Multi-round transcript: tool_call + tool +
-        // assistant. Parser must use LastIndexOf("[assistant]") to skip
-        // intermediate rounds and parse the final turn's structured output.
+        // assistant. Parser must use the final line-boundary [assistant] JSON
+        // payload to skip intermediate rounds.
         const string transcript = """
               [tool_call:toolu_01ABC] list_context_resources({"args":{}})
             [tool:toolu_01ABC] -> {"resources":[],"message":"No on-demand context resources are available."}
@@ -278,6 +308,44 @@ public class AgentRunReadControllerTests
         Assert.That(response, Is.Not.Null);
         Assert.That(response!.Score, Is.EqualTo(8));
         Assert.That(response.Issues, Has.Count.EqualTo(1));
+    }
+
+    [TestCase("[assistant]    {\"score\":6,\"issues\":[{\"text\":\"spaced\"}],\"suggestions\":[\"s\"]}")]
+    [TestCase("[assistant]\n{\"score\":6,\"issues\":[{\"text\":\"newline\"}],\"suggestions\":[\"s\"]}")]
+    public async Task GetAsync_AssistantTranscriptAllowsWhitespaceBeforeJsonObject(string transcript)
+    {
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, transcript) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.That(response!.Score, Is.EqualTo(6));
+        Assert.That(response.Issues, Has.Count.EqualTo(1));
+    }
+
+    [Test]
+    public async Task GetAsync_QuotedAssistantMarkerInsideJsonString_DoesNotRedirectParser()
+    {
+        const string transcript = """
+            [assistant] {"score":7,"issues":[{"text":"The literal [assistant] { marker can appear in content","reason":"quote"}],"suggestions":["Keep parser on transcript boundary"]}
+            """;
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, transcript) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.Score, Is.EqualTo(7));
+            Assert.That(response.Issues, Has.Count.EqualTo(1));
+            Assert.That(response.Issues[0].Text, Does.Contain("[assistant] {"));
+        });
     }
 
     // ─────────────────────────────────────────────────────────────────────

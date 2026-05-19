@@ -1,4 +1,4 @@
-import { css as f, state as h, customElement as y, nothing as u, html as s } from "@umbraco-cms/backoffice/external/lit";
+import { css as f, state as h, customElement as y, nothing as u, html as o } from "@umbraco-cms/backoffice/external/lit";
 import { UmbModalBaseElement as v } from "@umbraco-cms/backoffice/modal";
 import { UMB_AUTH_CONTEXT as p } from "@umbraco-cms/backoffice/auth";
 class d extends Error {
@@ -7,10 +7,10 @@ class d extends Error {
   }
 }
 async function b(t, e, a) {
-  const o = await t();
-  if (!o)
+  const s = await t();
+  if (!s)
     throw new d("Auth context unavailable");
-  const r = o.getOpenApiConfiguration();
+  const r = s.getOpenApiConfiguration();
   let n;
   try {
     n = await r.token();
@@ -37,10 +37,10 @@ async function b(t, e, a) {
     body: c ? JSON.stringify(a.body) : void 0
   });
 }
-var k = Object.defineProperty, w = Object.getOwnPropertyDescriptor, l = (t, e, a, o) => {
-  for (var r = o > 1 ? void 0 : o ? w(e, a) : e, n = t.length - 1, c; n >= 0; n--)
-    (c = t[n]) && (r = (o ? c(e, a, r) : c(r)) || r);
-  return o && r && k(e, a, r), r;
+var k = Object.defineProperty, w = Object.getOwnPropertyDescriptor, l = (t, e, a, s) => {
+  for (var r = s > 1 ? void 0 : s ? w(e, a) : e, n = t.length - 1, c; n >= 0; n--)
+    (c = t[n]) && (r = (s ? c(e, a, r) : c(r)) || r);
+  return s && r && k(e, a, r), r;
 };
 let i = class extends v {
   constructor() {
@@ -114,14 +114,18 @@ let i = class extends v {
         this._runDetailState = "unavailable";
         return;
       }
-      const o = await a.json();
+      const s = await a.json();
       if (e.signal.aborted)
         return;
-      if (!Array.isArray(o.issues) || !Array.isArray(o.suggestions)) {
+      if (!Array.isArray(s.issues) || !Array.isArray(s.suggestions)) {
         this._runDetailState = "unavailable";
         return;
       }
-      this._runDetail = o, this._runDetailState = "loaded";
+      if (s.score === null && s.issues.length === 0 && s.suggestions.length === 0) {
+        this._runDetailState = "unavailable";
+        return;
+      }
+      this._runDetail = s, this._runDetailState = "loaded";
     } catch (a) {
       if (a instanceof DOMException && a.name === "AbortError" || e.signal.aborted)
         return;
@@ -133,7 +137,7 @@ let i = class extends v {
   }
   _renderForm() {
     const t = this._score !== null, e = !t || this._state === "submitting", a = this._state === "submitting" ? "waiting" : void 0;
-    return s`
+    return o`
       <umb-body-layout headline="Run Feedback">
         ${this._renderAgentOutput()}
         <uui-box headline="How was this run?">
@@ -156,7 +160,7 @@ let i = class extends v {
             </uui-button>
           </div>
 
-          ${t ? s`<uui-textarea
+          ${t ? o`<uui-textarea
                 auto-height
                 label="Optional comment"
                 placeholder="Optional — explain why (helps the agent learn)"
@@ -192,7 +196,7 @@ let i = class extends v {
     `;
   }
   _renderSuccess() {
-    return s`
+    return o`
       <umb-body-layout headline="Run Feedback">
         ${this._renderAgentOutput()}
         <uui-box headline="Feedback recorded">
@@ -213,7 +217,7 @@ let i = class extends v {
     `;
   }
   _renderError() {
-    return s`<p role="alert" class="error">${this._errorMessage}</p>`;
+    return o`<p role="alert" class="error">${this._errorMessage}</p>`;
   }
   /**
    * Story 4.2 — DRIFT-4.1-12 closure. Renders the agent's score / flagged
@@ -232,7 +236,7 @@ let i = class extends v {
    */
   _renderAgentOutput() {
     if (this._runDetailState === "loading")
-      return s`
+      return o`
         <uui-box headline="Agent output" class="agent-output-box">
           <p class="agent-output-loading">
             <uui-loader></uui-loader>
@@ -241,27 +245,27 @@ let i = class extends v {
         </uui-box>
       `;
     if (this._runDetailState === "unavailable" || this._runDetail === null)
-      return s`
+      return o`
         <uui-box headline="Agent output" class="agent-output-box">
           <p class="agent-output-unavailable">
             Agent output unavailable; you can still submit feedback below.
           </p>
         </uui-box>
       `;
-    const t = this._runDetail, e = t.issues.length > 0, a = t.suggestions.length > 0, o = t.score !== null || e || a;
-    return s`
+    const t = this._runDetail, e = t.issues.length > 0, a = t.suggestions.length > 0, s = t.score !== null || e || a;
+    return o`
       <uui-box headline="Agent output" class="agent-output-box">
-        ${t.score !== null ? s`<p class="agent-output-score">
+        ${t.score !== null ? o`<p class="agent-output-score">
               Score: <strong>${t.score}</strong>
             </p>` : u}
-        ${e ? s`
+        ${e ? o`
               <h5 class="agent-output-section-heading">Flagged issues</h5>
               <ul class="agent-output-issues">
                 ${t.issues.map(
-      (r) => s`
+      (r) => o`
                     <li>
                       <span class="agent-output-issue-text">${r.text}</span>
-                      ${r.reason ? s`<span class="agent-output-issue-reason">
+                      ${r.reason ? o`<span class="agent-output-issue-reason">
                             — ${r.reason}
                           </span>` : u}
                     </li>
@@ -269,15 +273,15 @@ let i = class extends v {
     )}
               </ul>
             ` : u}
-        ${a ? s`
+        ${a ? o`
               <h5 class="agent-output-section-heading">Suggestions</h5>
               <ul class="agent-output-suggestions">
                 ${t.suggestions.map(
-      (r) => s`<li>${r}</li>`
+      (r) => o`<li>${r}</li>`
     )}
               </ul>
             ` : u}
-        ${o ? u : s`<p class="agent-output-empty-note">
+        ${s ? u : o`<p class="agent-output-empty-note">
               (no structured output captured for this run)
             </p>`}
       </uui-box>

@@ -5,10 +5,9 @@
  * empty-bearer guards + the Authorization-header strip-before-merge protection
  * that this helper inherits verbatim from LlmsTxt Story 6.0b.
  *
- * Widget-element unit tests against the live Bellissima modal infrastructure
- * are deferred to Story 5.x (test infra requires a Bellissima-aware fixture);
- * Story 2.3 AC7's axe-core CI gate is correspondingly deferred. AC8 manual
- * a11y gate (Task 6) provides v0.1 empirical confidence.
+ * Widget-element behaviour is covered separately by
+ * `feedback-widget/cogworks-agent-feedback.test.ts`; this file stays focused
+ * on the shared bearer-token fetch helper.
  */
 
 import { expect } from "@open-wc/testing";

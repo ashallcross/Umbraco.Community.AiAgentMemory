@@ -92,6 +92,7 @@ public sealed class AgentMemoryBackofficeApiComposer : IComposer
         private static readonly Type[] AllowedControllers = new[]
         {
             typeof(AgentFeedbackController),
+            typeof(AgentRunReadController),
         };
 
         public AgentMemoryOperationIdHandler(IOptions<ApiVersioningOptions> apiVersioningOptions)

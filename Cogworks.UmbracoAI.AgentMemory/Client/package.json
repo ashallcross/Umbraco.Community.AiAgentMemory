@@ -13,6 +13,7 @@
     "@umbraco-cms/backoffice": "17.2.2",
     "@web/dev-server-esbuild": "^1.0.5",
     "@web/test-runner": "^0.20.2",
+    "axe-core": "^4.11.4",
     "lit": "^3.3.2",
     "typescript": "^5.9.3",
     "vite": "^7.1.9"

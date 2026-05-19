@@ -155,6 +155,17 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
         this._runDetailState = "unavailable";
         return;
       }
+      // Backend parse-failure / empty-structured-output shape. AC7 treats this
+      // the same as 404 from the widget perspective: the editor sees the
+      // unavailable notice and can still submit feedback below.
+      if (
+        body.score === null &&
+        body.issues.length === 0 &&
+        body.suggestions.length === 0
+      ) {
+        this._runDetailState = "unavailable";
+        return;
+      }
       this._runDetail = body;
       this._runDetailState = "loaded";
     } catch (err) {
