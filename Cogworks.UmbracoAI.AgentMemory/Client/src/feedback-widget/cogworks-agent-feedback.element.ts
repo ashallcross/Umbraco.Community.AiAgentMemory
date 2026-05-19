@@ -1,6 +1,7 @@
 import { html, css, customElement, state, nothing } from "@umbraco-cms/backoffice/external/lit";
 import { UmbModalBaseElement } from "@umbraco-cms/backoffice/modal";
 import { UMB_AUTH_CONTEXT } from "@umbraco-cms/backoffice/auth";
+import { UMB_CURRENT_USER_CONTEXT } from "@umbraco-cms/backoffice/current-user";
 import {
   authenticatedFetch,
   AuthContextUnavailableError,
@@ -21,13 +22,37 @@ type AgentFeedbackModalData = {
 type ScoreString = "ThumbsUp" | "ThumbsDown";
 type WidgetState = "idle" | "submitting" | "success" | "error";
 type RunDetailState = "loading" | "loaded" | "unavailable";
+type ExistingFeedbackState = "loading" | "loaded" | "unavailable";
+
+/**
+ * Wire-format of `FeedbackScore` per Umbraco Management-API's default
+ * `JsonStringEnumConverter` — string-name, NOT numeric ordinal. Verified at
+ * Story 4.5 Task 0e against `AgentFeedbackControllerTests.cs:89, 105` + the
+ * existing widget's POST body shape. Literal-union (not a remote-enum copy)
+ * so the widget stays decoupled from server enum ordinal changes.
+ */
+type FeedbackScoreWire = "ThumbsUp" | "ThumbsDown" | "Neutral";
+
+/**
+ * One bullet from Story 3.3's "Lessons from past runs" memory-injection block,
+ * parsed by `AgentRunReadController.ParseMemoryInjection` and surfaced to the
+ * widget. Story 4.5 Q2a — Memory-used indicator + cited memories.
+ */
+type AgentRunCitedMemory = {
+  runIdPrefix: string;
+  emoji: string;
+  commentSnippet: string | null;
+};
 
 /**
  * Shape of the GET /umbraco/management/api/v1/cogworks-agent-memory/runs/{runId}
  * response — projected from `AgentRunRecord.ResponseSnapshotJoined` parsed as
- * the Brand Voice Auditor agent's structured-output schema (Story 4.1 AC3).
- * Story 4.2 closes DRIFT-4.1-12 by rendering this above the feedback form so
- * the editor sees what they're rating.
+ * the Brand Voice Auditor agent's structured-output schema (Story 4.1 AC3)
+ * + Story 4.5 memory-injection citation surface.
+ *
+ * Story 4.2 closes DRIFT-4.1-12 by rendering score/issues/suggestions above
+ * the feedback form. Story 4.5 extends with `memoryUsed` + `citedMemories`
+ * for the Memory-used badge + expandable cited-memories list.
  */
 type AgentRunDetail = {
   runId: string;
@@ -38,6 +63,21 @@ type AgentRunDetail = {
   score: number | null;
   issues: { text: string; reason: string | null }[];
   suggestions: string[];
+  memoryUsed: boolean;
+  citedMemories: AgentRunCitedMemory[];
+};
+
+/**
+ * Shape of the GET /umbraco/management/api/v1/cogworks-agent-memory/feedback/{runId}
+ * response — Story 4.5 Q1 feedback-read endpoint composing on
+ * `IAgentFeedbackService.GetFeedbackForRunAsync`.
+ */
+type AgentRunFeedbackEntry = {
+  score: FeedbackScoreWire;
+  comment: string | null;
+  createdBy: string;
+  createdByDisplayName: string | null;
+  createdUtc: string;
 };
 
 /**
@@ -55,7 +95,7 @@ type AgentRunDetail = {
  * error state via `role="alert"`.
  *
  * XSS defence (Story 2.3 AC9): all rendered content goes through Lit's auto-
- * encoding template interpolation. `unsafeHTML` is NEVER imported.
+   * encoding template interpolation. Lit's raw-HTML directive is NEVER imported.
  *
  * Confirm-before-cancel-with-unsaved-typed-comment: deferred to v0.2 per Story 3.4
  * Locked decision #4. Current behaviour: Cancel discards unsaved comment without
@@ -75,9 +115,24 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   @state() private _errorMessage = "";
   @state() private _runDetailState: RunDetailState = "loading";
   @state() private _runDetail: AgentRunDetail | null = null;
+  @state() private _existingFeedbackState: ExistingFeedbackState = "loading";
+  @state() private _existingFeedback: AgentRunFeedbackEntry[] | null = null;
+  @state() private _currentUserId: string | null = null;
 
   private _abortController: AbortController | null = null;
   private _runDetailAbortController: AbortController | null = null;
+  private _existingFeedbackAbortController: AbortController | null = null;
+
+  // One-shot guard so post-load `_existingFeedback` settles don't overwrite
+  // mid-edit form state on subsequent renders. Story 4.5 AC10.b.
+  private _hasSeededFromExisting = false;
+
+  // Promise of the current-user-id resolution. Captured at connect time so
+  // `_loadExistingFeedback` can await it before computing the seed —
+  // prevents the race where the feedback fetch lands first and
+  // `_findCurrentUserRow` returns undefined because `_currentUserId` hasn't
+  // settled yet. Story 4.5 AC10.b seed-correctness.
+  private _currentUserIdReady: Promise<void> | null = null;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -97,12 +152,48 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     // promise; render reacts via @state. Graceful degradation on any failure
     // (404, network error, parse failure) — the feedback form still works.
     void this._loadRunDetail();
+
+    // Story 4.5 Task 0h — resolve the current authenticated user GUID via
+    // UMB_CURRENT_USER_CONTEXT so the widget can decide which feedback row
+    // gets the Edit button (AC8.i) + drive the Submit-disable-on-no-change
+    // computation (AC10). Kicked off BEFORE the feedback fetch so the seed
+    // step inside `_loadExistingFeedback` can `await` it. The Promise is
+    // captured in `_currentUserIdReady` so the load awaits the same Promise
+    // even if it lands first.
+    this._currentUserIdReady = this._resolveCurrentUserId();
+
+    // Story 4.5 Q1 — parallel fetch for the editor's previous feedback rows
+    // on this run, so the modal re-open shows the editor's last submission
+    // + an Edit affordance for supersede. Story 4.5 AC8.
+    void this._loadExistingFeedback();
   }
 
   override disconnectedCallback() {
     this._abortController?.abort();
     this._runDetailAbortController?.abort();
+    this._existingFeedbackAbortController?.abort();
     super.disconnectedCallback();
+  }
+
+  private async _resolveCurrentUserId() {
+    try {
+      const ctx = await this.getContext(UMB_CURRENT_USER_CONTEXT);
+      // `getUnique()` returns the user GUID-as-string (matches server-side
+      // IBackOfficeSecurityAccessor.CurrentUser?.Key). When unavailable
+      // (context throws, returns undefined, or getUnique() returns null),
+      // `_currentUserId` stays null and `_findCurrentUserRow` returns
+      // undefined for every row — no Edit button renders for ANY row +
+      // Submit-disable-on-no-change does not engage. This is the conservative
+      // fallback (no false-positive Edit affordance on others' rows); v0.1.x
+      // could expand to "all rows show Edit; POST handler rejects mismatches"
+      // (Story 4.5 Task 0h fallback path) if adopter telemetry shows the
+      // current-user resolution failing in the wild. Manual gate Step 5
+      // confirmed the canonical UMB_CURRENT_USER_CONTEXT path works in
+      // production against Bellissima 17.3.2.
+      this._currentUserId = ctx?.getUnique() ?? null;
+    } catch {
+      this._currentUserId = null;
+    }
   }
 
   private async _loadRunDetail() {
@@ -158,10 +249,16 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       // Backend parse-failure / empty-structured-output shape. AC7 treats this
       // the same as 404 from the widget perspective: the editor sees the
       // unavailable notice and can still submit feedback below.
+      //
+      // Story 4.5 AC9.b — amended guard: when `memoryUsed === true` we render
+      // the agent-output box anyway (Memory-used badge + cited memories) even
+      // if score/issues/suggestions are all empty (edge case: agent emits a
+      // chat reply without a structured-output JSON tail).
       if (
         body.score === null &&
         body.issues.length === 0 &&
-        body.suggestions.length === 0
+        body.suggestions.length === 0 &&
+        !body.memoryUsed
       ) {
         this._runDetailState = "unavailable";
         return;
@@ -188,13 +285,134 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     }
   }
 
+  private async _loadExistingFeedback() {
+    const runId = this.data?.runId ?? "";
+    if (runId.length === 0) {
+      this._existingFeedbackState = "unavailable";
+      return;
+    }
+
+    this._existingFeedbackAbortController?.abort();
+    // Capture controller locally so post-await guards check the SAME
+    // controller's signal — mirror of `_loadRunDetail`'s hardened idiom per
+    // Story 4.2 review patches #2 + #7 + #8.
+    const controller = new AbortController();
+    this._existingFeedbackAbortController = controller;
+    this._existingFeedbackState = "loading";
+
+    try {
+      const response = await authenticatedFetch(
+        () => this.getContext(UMB_AUTH_CONTEXT),
+        `/umbraco/management/api/v1/cogworks-agent-memory/feedback/${encodeURIComponent(runId)}`,
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) {
+        return;
+      }
+      if (!response.ok) {
+        this._existingFeedbackState = "unavailable";
+        return;
+      }
+      const body = (await response.json()) as {
+        runId: string;
+        existing: AgentRunFeedbackEntry[];
+      };
+      if (controller.signal.aborted) {
+        return;
+      }
+      // Defensive shape guard — ProblemDetails accidentally shipped on 200,
+      // adopter proxy rewriting, etc. → unavailable.
+      if (!Array.isArray(body.existing)) {
+        this._existingFeedbackState = "unavailable";
+        return;
+      }
+      this._existingFeedback = body.existing;
+      this._existingFeedbackState = "loaded";
+
+      // Story 4.5 AC10.b — one-shot seed of the form state from the current
+      // user's row (so re-opening the modal shows their last submission and
+      // Submit-disable-on-no-change kicks in correctly). Await the
+      // current-user-id resolution before computing the seed — prevents the
+      // race where the feedback fetch lands first and `_findCurrentUserRow`
+      // returns undefined because `_currentUserId` hasn't settled yet.
+      //
+      // P13: AC10.b "subsequent settles MUST NOT clobber user input" — also
+      // skip the seed if the editor already touched the form during any
+      // await window above (toggled a score or typed in the textarea). The
+      // pre-seed user input is the explicit intent signal; honour it.
+      if (!this._hasSeededFromExisting) {
+        if (this._currentUserIdReady !== null) {
+          await this._currentUserIdReady;
+          if (controller.signal.aborted) {
+            return;
+          }
+        }
+        const userHasTouchedForm = this._score !== null || this._comment !== "";
+        if (!userHasTouchedForm) {
+          const myRow = this._findCurrentUserRow(body.existing);
+          if (myRow !== undefined) {
+            this._score = myRow.score === "Neutral"
+              ? null
+              : (myRow.score as ScoreString);
+            this._comment = myRow.comment ?? "";
+          }
+        }
+        this._hasSeededFromExisting = true;
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+      if (controller.signal.aborted) {
+        return;
+      }
+      // AuthContextUnavailableError, network errors, JSON parse failures,
+      // shape mismatches — all converge on unavailable; form remains usable.
+      this._existingFeedbackState = "unavailable";
+    }
+  }
+
+  /**
+   * Returns the row whose `createdBy` matches the resolved current-user id.
+   * Returns `undefined` if no current-user-id is available (Task 0h fallback)
+   * OR if no row matches — Submit-disable + Edit gating both treat both
+   * cases as "no existing row for this editor".
+   */
+  private _findCurrentUserRow(
+    rows: AgentRunFeedbackEntry[],
+  ): AgentRunFeedbackEntry | undefined {
+    if (this._currentUserId === null) {
+      return undefined;
+    }
+    return rows.find((r) => r.createdBy === this._currentUserId);
+  }
+
   override render() {
     return this._state === "success" ? this._renderSuccess() : this._renderForm();
   }
 
   private _renderForm() {
     const scoreSelected = this._score !== null;
-    const submitDisabled = !scoreSelected || this._state === "submitting";
+
+    // Story 4.5 AC10 — Submit-disable-on-no-change: when the current user has
+    // an existing-feedback row AND the form state exactly matches it,
+    // Submit stays disabled. Edit-button click is the explicit intent signal
+    // for supersede; subsequent mutation (score-toggle or comment input)
+    // re-enables Submit. NO confirm-modal at v0.1 per Story 3.4 LD#4 +
+    // Story 4.5 supersede confirmation drop.
+    const myRow = this._existingFeedback !== null
+      ? this._findCurrentUserRow(this._existingFeedback)
+      : undefined;
+    const seededScore = myRow?.score === "Neutral"
+      ? null
+      : (myRow?.score as ScoreString | undefined) ?? null;
+    const seededComment = myRow?.comment ?? "";
+    const equalsExisting = myRow !== undefined
+      && this._score === seededScore
+      && this._comment === seededComment;
+
+    const submitDisabled =
+      !scoreSelected || this._state === "submitting" || equalsExisting;
     const submitState = this._state === "submitting" ? "waiting" : undefined;
 
     // Modelled verbatim on Bellissima's `<umb-current-user-modal>` chrome:
@@ -208,6 +426,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     // Cancel button + Esc + backdrop click are the canonical dismissal paths.
     return html`
       <umb-body-layout headline="Run Feedback">
+        ${this._renderExistingFeedback()}
         ${this._renderAgentOutput()}
         <uui-box headline="How was this run?">
           <div class="row">
@@ -270,6 +489,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   private _renderSuccess() {
     return html`
       <umb-body-layout headline="Run Feedback">
+        ${this._renderExistingFeedback()}
         ${this._renderAgentOutput()}
         <uui-box headline="Feedback recorded">
           <p role="status" class="success">Thanks — your feedback was recorded.</p>
@@ -296,6 +516,113 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   }
 
   /**
+   * Story 4.5 Q1 — renders editor feedback rows that already exist for this
+   * run (Previous-feedback block) so the editor sees their (and others')
+   * prior thumbs-up/down + comments. The current user's row carries an Edit
+   * affordance that pre-populates the form for supersede; other editors'
+   * rows render in display-only mode (collegial collaboration framing).
+   *
+   * Render conditions: omitted entirely when state is not "loaded" OR the
+   * `existing` array is empty (no UI noise on the no-prior-feedback case).
+   *
+   * XSS defence pin (Story 4.5 AC11 + Story 2.3 AC9 + Story 4.2 AC6):
+   * comment text + display name render via Lit auto-encoding; no
+   * Lit's raw-HTML directive.
+   */
+  private _renderExistingFeedback() {
+    if (this._existingFeedbackState !== "loaded") {
+      return nothing;
+    }
+    const rows = this._existingFeedback;
+    if (rows === null || rows.length === 0) {
+      return nothing;
+    }
+    // Sort: current user's row first (when present), then others by
+    // createdUtc DESC. Story 4.5 AC8.k.
+    const myRow = this._findCurrentUserRow(rows);
+    const others = rows
+      .filter((r) => r !== myRow)
+      .sort((a, b) => b.createdUtc.localeCompare(a.createdUtc));
+    const sorted = myRow !== undefined ? [myRow, ...others] : others;
+
+    return html`
+      <uui-box headline="Previous feedback" class="previous-feedback-box">
+        ${sorted.map((row) => this._renderExistingFeedbackRow(row, row === myRow))}
+      </uui-box>
+    `;
+  }
+
+  private _renderExistingFeedbackRow(
+    row: AgentRunFeedbackEntry,
+    isCurrentUserRow: boolean,
+  ) {
+    const emoji = row.score === "ThumbsUp"
+      ? "👍"
+      : row.score === "ThumbsDown"
+      ? "👎"
+      : "•";
+    const displayName = row.createdByDisplayName ?? "An editor";
+    // Best-effort locale-aware timestamp; falls back to ISO when Intl parsing
+    // throws (e.g. malformed string from a misconfigured server). Lit auto-
+    // encodes the resulting string.
+    let timestamp = row.createdUtc;
+    try {
+      const date = new Date(row.createdUtc);
+      if (!Number.isNaN(date.getTime())) {
+        timestamp = date.toLocaleString();
+      }
+    } catch {
+      // Keep ISO fallback.
+    }
+    return html`
+      <div class="previous-feedback-row">
+        <p class="previous-feedback-content">
+          <span class="previous-feedback-emoji" aria-hidden="true">${emoji}</span>
+          ${row.comment !== null && row.comment.length > 0
+            ? html`<span class="previous-feedback-comment">${row.comment}</span>`
+            : html`<span class="previous-feedback-no-comment">(no comment)</span>`}
+        </p>
+        <p class="previous-feedback-footer">
+          ${displayName} · ${timestamp}
+        </p>
+        ${isCurrentUserRow && row.score !== "Neutral"
+          ? html`<uui-button
+              look="secondary"
+              label="Edit"
+              class="previous-feedback-edit-button"
+              @click=${() => this._onEditClick(row)}
+            >
+              Edit
+            </uui-button>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  /**
+   * Story 4.5 AC8.j — Edit-button click pre-populates the form from the
+   * existing-feedback row + acts as the explicit intent signal for
+   * supersede. Submit-disable-on-no-change (AC10) keeps Submit disabled
+   * until the editor actually mutates score or comment from the seeded
+   * values — clicking Edit alone does NOT enable Submit.
+   *
+   * Neutral score is display-only in the existing-feedback block (Story 2.3
+   * widget only emits ThumbsUp / ThumbsDown); Neutral rows do NOT carry an
+   * Edit button per AC8.i so this handler never receives one.
+   */
+  private _onEditClick(row: AgentRunFeedbackEntry) {
+    this._score = row.score === "Neutral"
+      ? null
+      : (row.score as ScoreString);
+    this._comment = row.comment ?? "";
+    // Clear any prior error state — Edit signals a fresh attempt.
+    if (this._state === "error") {
+      this._state = "idle";
+      this._errorMessage = "";
+    }
+  }
+
+  /**
    * Story 4.2 — DRIFT-4.1-12 closure. Renders the agent's score / flagged
    * issues / suggestions ABOVE the existing feedback form so the editor sees
    * what they're rating. Three states:
@@ -307,8 +634,8 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
    *
    * **XSS defence pin (Story 4.2 AC6 + Story 2.3 AC9):** all agent-derived
    * fields render via Lit's automatic template-literal HTML-encoding. The
-   * `unsafeHTML` symbol is NEVER imported in this file — static grep gate at
-   * `grep -r 'unsafeHTML' Client/src/feedback-widget/` returns zero matches.
+   * Lit's raw-HTML directive is NEVER imported in this file — static grep gate
+   * over the directive token returns zero matches.
    */
   private _renderAgentOutput() {
     if (this._runDetailState === "loading") {
@@ -337,9 +664,20 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     const hasSuggestions = detail.suggestions.length > 0;
     const hasStructuredOutput =
       detail.score !== null || hasIssues || hasSuggestions;
+    const hasCitedMemories =
+      detail.memoryUsed && detail.citedMemories.length > 0;
 
     return html`
       <uui-box headline="Agent output" class="agent-output-box">
+        ${detail.memoryUsed
+          ? html`<uui-tag
+              slot="header-actions"
+              color="positive"
+              class="memory-used-badge"
+            >
+              Memory used
+            </uui-tag>`
+          : nothing}
         ${detail.score !== null
           ? html`<p class="agent-output-score">
               Score: <strong>${detail.score}</strong>
@@ -378,6 +716,34 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
           ? html`<p class="agent-output-empty-note">
               (no structured output captured for this run)
             </p>`
+          : nothing}
+        ${hasCitedMemories
+          ? html`
+              <details class="cited-memories-details">
+                <summary>
+                  ${detail.citedMemories.length === 1
+                    ? "1 memory cited"
+                    : `${detail.citedMemories.length} memories cited`}
+                </summary>
+                <ul class="cited-memories-list">
+                  ${detail.citedMemories.map(
+                    (mem) => html`
+                      <li class="cited-memory-row">
+                        <span class="cited-memory-run">Run ${mem.runIdPrefix}</span>
+                        <span class="cited-memory-emoji" aria-hidden="true">${mem.emoji}</span>
+                        ${mem.commentSnippet !== null
+                          ? html`<span class="cited-memory-snippet">
+                              · "${mem.commentSnippet}"
+                            </span>`
+                          : html`<span class="cited-memory-no-comment">
+                              · (no comment)
+                            </span>`}
+                      </li>
+                    `,
+                  )}
+                </ul>
+              </details>
+            `
           : nothing}
       </uui-box>
     `;
@@ -625,6 +991,90 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
 
     .agent-output-issue-reason {
       color: var(--uui-color-text-alt);
+    }
+
+    /* Story 4.5 — Previous-feedback block (Q1; AC8) + Memory-used badge + cited memories (Q2a; AC9). */
+    .previous-feedback-box {
+      display: block;
+      margin-bottom: var(--uui-size-space-4);
+    }
+
+    .previous-feedback-row {
+      padding: var(--uui-size-space-2) 0;
+      border-bottom: 1px solid var(--uui-color-border);
+    }
+
+    .previous-feedback-row:last-child {
+      border-bottom: none;
+    }
+
+    .previous-feedback-content {
+      margin: 0 0 var(--uui-size-space-1) 0;
+      display: flex;
+      align-items: flex-start;
+      gap: var(--uui-size-space-2);
+    }
+
+    .previous-feedback-emoji {
+      flex-shrink: 0;
+    }
+
+    .previous-feedback-comment {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .previous-feedback-no-comment {
+      color: var(--uui-color-text-alt);
+      font-style: italic;
+    }
+
+    .previous-feedback-footer {
+      margin: 0 0 var(--uui-size-space-2) 0;
+      color: var(--uui-color-text-alt);
+      font-size: var(--uui-type-small-size, 0.875rem);
+    }
+
+    .previous-feedback-edit-button {
+      margin-top: var(--uui-size-space-1);
+    }
+
+    /* Memory-used badge sits in the agent-output uui-box's header-actions slot. */
+    .memory-used-badge {
+      align-self: center;
+    }
+
+    .cited-memories-details {
+      margin-top: var(--uui-size-space-3);
+      font-size: var(--uui-type-small-size, 0.875rem);
+    }
+
+    .cited-memories-details summary {
+      cursor: pointer;
+      color: var(--uui-color-text-alt);
+      user-select: none;
+    }
+
+    .cited-memories-list {
+      margin: var(--uui-size-space-2) 0 0 0;
+      padding-left: var(--uui-size-space-5);
+    }
+
+    .cited-memory-row {
+      margin-bottom: var(--uui-size-space-1);
+    }
+
+    .cited-memory-run {
+      font-weight: 600;
+    }
+
+    .cited-memory-snippet {
+      color: var(--uui-color-text-alt);
+    }
+
+    .cited-memory-no-comment {
+      color: var(--uui-color-text-alt);
+      font-style: italic;
     }
   `;
 }

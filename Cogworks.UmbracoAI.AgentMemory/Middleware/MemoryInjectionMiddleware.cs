@@ -165,6 +165,44 @@ internal sealed class MemoryInjectionMiddleware : DelegatingChatClient
         // (Story 3.2 contract); we reuse the same list for the inner chat call.
         var list = messages.ToList();
 
+        // Story 4.5 DRIFT-4.5-impl-1 — FeatureType preservation patch (architect
+        // ratification 2026-05-19 mid-gate). The retriever's embedding pipeline
+        // (Umbraco.AI's ScopedProfileEmbeddingGenerator + ScopedInlineEmbedding-
+        // Generator) MUTATES the agent's runtime context scope's profile +
+        // feature metadata without snapshot/restore — see Story 4.5 § Pre-flight
+        // notes Step 1 for the upstream-source-trace. Consequence pre-patch:
+        // the agent's outer chat call's audit-log row gets attributed as
+        // FeatureType="inline-embedding" + ProfileAlias="openai-embedding" etc.,
+        // and the cascade through AgentFeedbackController.PostAsync (Story 2.2)
+        // — which filters on FeatureType="agent" — returns 404 on submit;
+        // downstream the feedback row + memory entry would index under the
+        // wrong AgentId, and Run 2's retriever would find zero entries (demo
+        // loop wouldn't close). The fix below snapshots all 9 profile + feature
+        // keys before the retriever call + restores them in a finally so the
+        // wrapped chat call's audit row captures the agent's identity correctly.
+        //
+        // This is the v0.1 in-our-code workaround for an upstream defect; the
+        // architecturally correct fix would be in upstream ScopedProfileEmbedd-
+        // ingGenerator (snapshot/restore in its PopulateProfileMetadata when
+        // scopeExisted=true). Deferred to a future upstream PR; the in-our-
+        // code fix is sufficient for v0.1.
+        // P12: snapshot via TryGetValue so we can distinguish "key set" from
+        // "key absent". Restoring `default(T)` for an originally-absent key
+        // would actively corrupt the post-condition the snapshot is meant to
+        // preserve — writing Guid.Empty / null / 0 into a context that didn't
+        // carry the key on entry. Only keys present pre-snapshot are restored;
+        // any key the retriever adds that wasn't there before is left alone
+        // (no false-positive overwrites of downstream contributions).
+        var hadProfileId = context.TryGetValue<Guid>(Umbraco.AI.Core.Constants.ContextKeys.ProfileId, out var savedProfileId);
+        var hadProfileAlias = context.TryGetValue<string>(Umbraco.AI.Core.Constants.ContextKeys.ProfileAlias, out var savedProfileAlias);
+        var hadProfileVersion = context.TryGetValue<int>(Umbraco.AI.Core.Constants.ContextKeys.ProfileVersion, out var savedProfileVersion);
+        var hadProviderId = context.TryGetValue<string>(Umbraco.AI.Core.Constants.ContextKeys.ProviderId, out var savedProviderId);
+        var hadModelId = context.TryGetValue<string>(Umbraco.AI.Core.Constants.ContextKeys.ModelId, out var savedModelId);
+        var hadFeatureType = context.TryGetValue<string>(Umbraco.AI.Core.Constants.ContextKeys.FeatureType, out var savedFeatureType);
+        var hadFeatureId = context.TryGetValue<Guid>(Umbraco.AI.Core.Constants.ContextKeys.FeatureId, out var savedFeatureId);
+        var hadFeatureAlias = context.TryGetValue<string>(Umbraco.AI.Core.Constants.ContextKeys.FeatureAlias, out var savedFeatureAlias);
+        var hadFeatureVersion = context.TryGetValue<int>(Umbraco.AI.Core.Constants.ContextKeys.FeatureVersion, out var savedFeatureVersion);
+
         // AC3 — retrieve. workspaceId: null is the v0.1 production default per
         // Story 3.1 Locked decision #9 (FR33/FR34/FR36 v0.2 candidate).
         IReadOnlyList<MemoryEntry> memories;
@@ -191,6 +229,25 @@ internal sealed class MemoryInjectionMiddleware : DelegatingChatClient
                 agentId);
             return list;
         }
+        finally
+        {
+            // Story 4.5 DRIFT-4.5-impl-1 — restore profile + feature context
+            // keys regardless of retriever outcome (success / NFR-R3 caught
+            // exception / cancellation rethrow). The wrapped chat call's audit
+            // row (captured by Umbraco.AI's AIAuditingChatClient at AC5 of
+            // Story 3.3) thereby reads the agent's identity correctly:
+            // FeatureType="agent", FeatureId={agent's GUID}, ProfileAlias=
+            // {chat profile alias}, etc.
+            if (hadProfileId) context.SetValue(Umbraco.AI.Core.Constants.ContextKeys.ProfileId, savedProfileId);
+            if (hadProfileAlias) context.SetValue(Umbraco.AI.Core.Constants.ContextKeys.ProfileAlias, savedProfileAlias!);
+            if (hadProfileVersion) context.SetValue(Umbraco.AI.Core.Constants.ContextKeys.ProfileVersion, savedProfileVersion);
+            if (hadProviderId) context.SetValue(Umbraco.AI.Core.Constants.ContextKeys.ProviderId, savedProviderId!);
+            if (hadModelId) context.SetValue(Umbraco.AI.Core.Constants.ContextKeys.ModelId, savedModelId!);
+            if (hadFeatureType) context.SetValue(Umbraco.AI.Core.Constants.ContextKeys.FeatureType, savedFeatureType!);
+            if (hadFeatureId) context.SetValue(Umbraco.AI.Core.Constants.ContextKeys.FeatureId, savedFeatureId);
+            if (hadFeatureAlias) context.SetValue(Umbraco.AI.Core.Constants.ContextKeys.FeatureAlias, savedFeatureAlias!);
+            if (hadFeatureVersion) context.SetValue(Umbraco.AI.Core.Constants.ContextKeys.FeatureVersion, savedFeatureVersion);
+        }
 
         // AC5 — FR26 empty-result pass-through.
         if (memories.Count == 0)
@@ -212,10 +269,17 @@ internal sealed class MemoryInjectionMiddleware : DelegatingChatClient
 
     // AR21 brand-anchor: "Lessons from past runs" literal first-line is the
     // LOAD-BEARING audit-log surface for FR43; rename only with Adam approval.
+    //
+    // P11: writes "\n" literals (NOT StringBuilder.AppendLine, which emits
+    // Environment.NewLine and therefore "\r\n" on Windows hosts). The
+    // downstream parser at AgentRunReadController.ParseMemoryInjection
+    // anchors on the LF-only literal "[system] Lessons from past runs:\n";
+    // a CRLF emit would flip MemoryUsed false + null every commentSnippet on
+    // Windows adopters. Pin LF here so the wire shape is OS-independent.
     private static string BuildMemorySystemMessage(IReadOnlyList<MemoryEntry> memories)
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("Lessons from past runs:");
+        sb.Append("Lessons from past runs:\n");
         foreach (var memory in memories)
         {
             var marker = memory.Score switch
@@ -243,7 +307,8 @@ internal sealed class MemoryInjectionMiddleware : DelegatingChatClient
             // one bullet line; preserves audit-log parseability for FR43 + LLM
             // bullet-list interpretation.
             sb.Append(FlattenForBullet(memory.Summary));
-            sb.AppendLine(feedbackSuffix);
+            sb.Append(feedbackSuffix);
+            sb.Append('\n');
         }
 
         return sb.ToString();

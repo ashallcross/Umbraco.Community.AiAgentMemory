@@ -42,7 +42,8 @@ public class AgentRunReadControllerTests
     private static AgentRunRecord MakeRunRecord(
         Guid agentId,
         string? responseSnapshotJoined,
-        string runId = DefaultRunId) => new(
+        string runId = DefaultRunId,
+        string? promptSnapshotJoined = "[user] prompt") => new(
         RunId: runId,
         AgentId: agentId,
         AgentVersion: 1,
@@ -50,7 +51,7 @@ public class AgentRunReadControllerTests
         CompletedUtc: new DateTime(2026, 5, 19, 12, 0, 5, DateTimeKind.Utc),
         AggregateStatus: AgentRunStatus.Succeeded,
         Error: null,
-        PromptSnapshotJoined: "[user] prompt",
+        PromptSnapshotJoined: promptSnapshotJoined,
         ResponseSnapshotJoined: responseSnapshotJoined,
         TokenCountInput: 100,
         TokenCountOutput: 20,
@@ -345,6 +346,203 @@ public class AgentRunReadControllerTests
             Assert.That(response!.Score, Is.EqualTo(7));
             Assert.That(response.Issues, Has.Count.EqualTo(1));
             Assert.That(response.Issues[0].Text, Does.Contain("[assistant] {"));
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // AC4 (Story 4.5 Q2a) — Memory-injection parse from PromptSnapshotJoined
+    // ─────────────────────────────────────────────────────────────────────
+
+    private const string MemoryAnchor = "[system] Lessons from past runs:\n";
+
+    [Test]
+    public async Task GetAsync_NoMemoryInjectionInPromptSnapshot_ReturnsMemoryUsedFalseAndEmptyCitedMemories()
+    {
+        // Run 1 baseline. Default MakeRunRecord PromptSnapshotJoined = "[user] prompt".
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.MemoryUsed, Is.False);
+            Assert.That(response.CitedMemories, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task GetAsync_SingleMemoryInjection_ReturnsMemoryUsedTrueAndOneCitedMemory()
+    {
+        var prompt = MemoryAnchor
+            + "• Run 347c2071 👎: digest text here — \"editor comment verbatim\"\n"
+            + "\n"
+            + "[user] Audit this content...\n";
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null, promptSnapshotJoined: prompt) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.MemoryUsed, Is.True);
+            Assert.That(response.CitedMemories, Has.Count.EqualTo(1));
+            Assert.That(response.CitedMemories[0].RunIdPrefix, Is.EqualTo("347c2071"));
+            Assert.That(response.CitedMemories[0].Emoji, Is.EqualTo("👎"));
+            Assert.That(response.CitedMemories[0].CommentSnippet, Is.EqualTo("editor comment verbatim"));
+        });
+    }
+
+    [Test]
+    public async Task GetAsync_MultipleMemoryInjection_ReturnsMemoryUsedTrueAndAllCitedMemoriesInOrder()
+    {
+        var prompt = MemoryAnchor
+            + "• Run aaaaaaaa 👎: summary 1 — \"comment 1\"\n"
+            + "• Run bbbbbbbb 👍: summary 2 — \"comment 2\"\n"
+            + "• Run cccccccc •: summary 3\n"
+            + "• Run dddddddd 👎: summary 4 — \"comment 4\"\n"
+            + "• Run eeeeeeee 👍: summary 5 — \"comment 5\"\n"
+            + "\n[user] go\n";
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null, promptSnapshotJoined: prompt) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.MemoryUsed, Is.True);
+            Assert.That(response.CitedMemories, Has.Count.EqualTo(5));
+            Assert.That(response.CitedMemories[0].RunIdPrefix, Is.EqualTo("aaaaaaaa"));
+            Assert.That(response.CitedMemories[4].RunIdPrefix, Is.EqualTo("eeeeeeee"));
+            Assert.That(response.CitedMemories[2].CommentSnippet, Is.Null,
+                "Neutral bullet with no comment suffix — CommentSnippet = null per BuildMemorySystemMessage comment-null branch.");
+        });
+    }
+
+    [Test]
+    public async Task GetAsync_MemoryInjectionWithCommentExceeding300Chars_TruncatesCommentSnippetWithEllipsis()
+    {
+        var longComment = new string('x', 500);
+        var prompt = MemoryAnchor
+            + $"• Run 347c2071 👎: summary — \"{longComment}\"\n\n[user] go\n";
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null, promptSnapshotJoined: prompt) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.CitedMemories, Has.Count.EqualTo(1));
+            Assert.That(response.CitedMemories[0].CommentSnippet, Is.Not.Null);
+            Assert.That(response.CitedMemories[0].CommentSnippet!.Length, Is.EqualTo(301),
+                "300 chars + 1-char ellipsis (…) = 301.");
+            Assert.That(response.CitedMemories[0].CommentSnippet!.EndsWith("…"), Is.True);
+        });
+    }
+
+    [Test]
+    public async Task GetAsync_MemoryInjectionExceedsCap_TrimsToMaxCitedMemories()
+    {
+        // 11 bullets. MaxCitedMemories = 10. AC4.e mandates that the cap test
+        // ALSO proves the structured-output parse still populates Score /
+        // Issues / Suggestions correctly — i.e. the cap doesn't bleed into the
+        // rest of the response shape.
+        var bullets = string.Join("\n", Enumerable.Range(0, 11)
+            .Select(i => $"• Run {i:D8} 👎: summary {i} — \"comment {i}\""));
+        var prompt = MemoryAnchor + bullets + "\n\n[user] go\n";
+        const string responseJson = """
+            {
+              "score": 8,
+              "issues": [
+                { "text": "still flagged", "reason": "Guideline #6 colloquialism" }
+              ],
+              "suggestions": [
+                "Rephrase 'still flagged' to direct nature description."
+              ]
+            }
+            """;
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: responseJson, promptSnapshotJoined: prompt) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.MemoryUsed, Is.True);
+            Assert.That(response.CitedMemories, Has.Count.EqualTo(AgentRunReadController.MaxCitedMemories),
+                "Cap pinned by MaxCitedMemories = 10.");
+            // AC4.e co-assertion — structured-output fields populate correctly
+            // alongside the capped cited-memories list.
+            Assert.That(response.Score, Is.EqualTo(8));
+            Assert.That(response.Issues, Has.Count.EqualTo(1));
+            Assert.That(response.Issues[0].Text, Is.EqualTo("still flagged"));
+            Assert.That(response.Suggestions, Has.Count.EqualTo(1));
+            Assert.That(response.Suggestions[0],
+                Does.StartWith("Rephrase 'still flagged'"));
+        });
+    }
+
+    [Test]
+    public async Task GetAsync_MalformedMemoryInjectionBlock_ReturnsMemoryUsedFalseAndEmptyCitedMemoriesAndLogsWarning()
+    {
+        // Anchor matches but the subsequent lines don't follow "• Run {first8} {emoji}:" shape.
+        var prompt = MemoryAnchor + "garbled content without bullet format\n[user] go\n";
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null, promptSnapshotJoined: prompt) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.MemoryUsed, Is.False);
+            Assert.That(response.CitedMemories, Is.Empty);
+        });
+        _logger.Received(1).Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception?>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Test]
+    public async Task GetAsync_MemoryInjectionBulletWithNoCommentSuffix_ReturnsCitedMemoryWithNullCommentSnippet()
+    {
+        // BuildMemorySystemMessage's comment-null branch (line 228-230).
+        var prompt = MemoryAnchor
+            + "• Run 347c2071 👍: digest-only summary\n"
+            + "\n[user] go\n";
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null, promptSnapshotJoined: prompt) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.MemoryUsed, Is.True);
+            Assert.That(response.CitedMemories, Has.Count.EqualTo(1));
+            Assert.That(response.CitedMemories[0].CommentSnippet, Is.Null);
         });
     }
 

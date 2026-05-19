@@ -80,6 +80,36 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
     /// </summary>
     internal const int MaxStructuredOutputItems = 100;
 
+    /// <summary>
+    /// Cap on the number of memory-injection bullets surfaced to the widget
+    /// via <see cref="AgentRunDetailResponse.CitedMemories"/>. Defensive
+    /// against runaway-emission shapes mirroring
+    /// <see cref="MaxStructuredOutputItems"/>; v0.1 TopK is well under this
+    /// cap (Story 3.2's <c>AgentMemoryOptions.MemoryTopK</c> default 5).
+    /// Story 4.5 Q2a.
+    /// </summary>
+    internal const int MaxCitedMemories = 10;
+
+    /// <summary>
+    /// Cap on each <see cref="AgentRunCitedMemory.CommentSnippet"/> in chars.
+    /// Trimmed at the controller layer (NOT the widget) with <c>"…"</c>
+    /// ellipsis appended. Editor comments can run to 4000 chars (the
+    /// <see cref="AgentFeedbackController.CommentMaxChars"/> cap) but the
+    /// widget's cited-memory list cell would overflow at that length.
+    /// Story 4.5 Q2a.
+    /// </summary>
+    internal const int CommentSnippetMaxChars = 300;
+
+    /// <summary>
+    /// Anchor literal matched at the start of
+    /// <see cref="Runs.AgentRunRecord.PromptSnapshotJoined"/> to detect memory
+    /// injection. Story 3.3 outer-wrapping invariant — the upstream chat
+    /// composer prepends <c>"[system] "</c> to the system-role message body
+    /// emitted by
+    /// <c>MemoryInjectionMiddleware.BuildMemorySystemMessage</c>.
+    /// </summary>
+    private const string MemoryInjectionAnchor = "[system] Lessons from past runs:\n";
+
     private readonly IAgentRunReader _runReader;
     private readonly ILogger<AgentRunReadController> _logger;
 
@@ -121,6 +151,15 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
+        // Story 4.5 — canonical Story 1.2 reader contract. DRIFT-4.5-impl-1
+        // middleware FeatureType-preservation patch (architect ratification
+        // 2026-05-19 mid-gate) ensures the agent's chat-call audit row is
+        // attributed `FeatureType="agent"` — so GetRunsForThreadAsync's
+        // FeatureType=agent filter surfaces it correctly. The Story 4.5 spec
+        // originally proposed a reader-side workaround (GetChatRunForThreadAsync)
+        // but architect ratification reverted that mechanism in favour of the
+        // cause-fix at the middleware. See Story 4.5 § Architect ratification
+        // 2026-05-19.
         var runs = await _runReader
             .GetRunsForThreadAsync(runId, cancellationToken)
             .ConfigureAwait(false);
@@ -138,11 +177,12 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
 
         // v0.1 single-agent attribution assumption — Brand Voice Audit demo's
         // workflow is single-agent (one Run AI Agent step). Mirrors
-        // AgentFeedbackController.PostAsync line 172. Multi-agent
-        // disambiguation is a v0.2 candidate.
+        // AgentFeedbackController.PostAsync. Multi-agent disambiguation is a
+        // v0.2 candidate.
         var run = runs[0];
 
         var (score, issues, suggestions) = TryParseStructuredOutput(run.ResponseSnapshotJoined);
+        var (memoryUsed, citedMemories) = ParseMemoryInjection(run.PromptSnapshotJoined);
 
         var response = new AgentRunDetailResponse(
             RunId: runId,
@@ -154,7 +194,9 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
             RanAtUtc: run.StartedUtc,
             Score: score,
             Issues: issues,
-            Suggestions: suggestions);
+            Suggestions: suggestions,
+            MemoryUsed: memoryUsed,
+            CitedMemories: citedMemories);
 
         return Ok(response);
     }
@@ -394,5 +436,157 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
             }
         }
         return list;
+    }
+
+    /// <summary>
+    /// Parses the Story 3.3 memory-injection block out of the upstream
+    /// <see cref="Runs.AgentRunRecord.PromptSnapshotJoined"/>. Returns
+    /// <c>(false, [])</c> when the anchor doesn't match (Run 1 baseline; common
+    /// case) and <c>(true, [...])</c> when one or more bullet lines parse
+    /// successfully. Story 4.5 Q2a.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Anchor:</b> the literal <c>"[system] Lessons from past runs:\n"</c>
+    /// at the start of <paramref name="promptSnapshotJoined"/> (Story 3.3
+    /// outer-wrapping invariant — the upstream chat composer prepends
+    /// <c>"[system] "</c> to the system-role message body).
+    /// </para>
+    /// <para>
+    /// <b>Bullet shape:</b>
+    /// <code>• Run {first8} {emoji}: {summary} — "{comment}"</code>
+    /// where <c>{first8}</c> is the memory's RunId truncated to its first 8
+    /// chars (or shorter if the RunId itself is shorter — defensive Math.Min
+    /// per BuildMemorySystemMessage line 237); <c>{emoji}</c> is one of
+    /// <c>👍 👎 •</c>; the <c> — "{comment}"</c> suffix is OMITTED when the
+    /// memory had no editor comment (BuildMemorySystemMessage line 228-230).
+    /// </para>
+    /// <para>
+    /// <b>Truncation:</b> each parsed comment is truncated at
+    /// <see cref="CommentSnippetMaxChars"/> chars with <c>"…"</c> appended.
+    /// </para>
+    /// <para>
+    /// <b>Cap:</b> the bullet count is capped at <see cref="MaxCitedMemories"/>
+    /// — defensive against runaway-emission shapes.
+    /// </para>
+    /// <para>
+    /// <b>Drift detection:</b> if the anchor matches but no bullets parse (i.e.
+    /// Story 3.3 format drift), the method emits a Warning log and returns
+    /// <c>(false, [])</c> — graceful degradation per NFR-R1.
+    /// </para>
+    /// </remarks>
+    private (bool memoryUsed, IReadOnlyList<AgentRunCitedMemory> citedMemories)
+        ParseMemoryInjection(string? promptSnapshotJoined)
+    {
+        if (string.IsNullOrWhiteSpace(promptSnapshotJoined))
+        {
+            _logger.LogDebug(
+                "AgentRunReadController.ParseMemoryInjection — empty PromptSnapshotJoined; no memory-injection block.");
+            return (false, Array.Empty<AgentRunCitedMemory>());
+        }
+
+        if (!promptSnapshotJoined.StartsWith(MemoryInjectionAnchor, StringComparison.Ordinal))
+        {
+            _logger.LogDebug(
+                "AgentRunReadController.ParseMemoryInjection — PromptSnapshotJoined does not start with memory-injection anchor; treating as Run-1 baseline (no injection).");
+            return (false, Array.Empty<AgentRunCitedMemory>());
+        }
+
+        // Body region starts immediately after the anchor and runs through to
+        // the first occurrence of a non-bullet line (typically a blank line
+        // before "[user] ...") or end-of-string.
+        var bodyStart = MemoryInjectionAnchor.Length;
+        var list = new List<AgentRunCitedMemory>(MaxCitedMemories);
+
+        var cursor = bodyStart;
+        while (cursor < promptSnapshotJoined.Length && list.Count < MaxCitedMemories)
+        {
+            // Find next newline (or end of string).
+            var newlineIdx = promptSnapshotJoined.IndexOf('\n', cursor);
+            var lineEnd = newlineIdx < 0 ? promptSnapshotJoined.Length : newlineIdx;
+            var line = promptSnapshotJoined.AsSpan(cursor, lineEnd - cursor);
+
+            // Stop at the first non-bullet line — the injection block has
+            // ended (typically the next system/user/assistant message).
+            if (!line.StartsWith("• Run ", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            var parsed = TryParseBulletLine(line);
+            if (parsed is not null)
+            {
+                list.Add(parsed);
+            }
+
+            // Advance past newline (or to end).
+            cursor = newlineIdx < 0 ? promptSnapshotJoined.Length : newlineIdx + 1;
+        }
+
+        if (list.Count == 0)
+        {
+            _logger.LogWarning(
+                "AgentRunReadController.ParseMemoryInjection — anchor matched but zero bullets parsed; Story 3.3 PromptSnapshot format drift suspected. PromptSnapshotJoined prefix={Prefix}",
+                promptSnapshotJoined.Length > 200 ? promptSnapshotJoined[..200] + "…" : promptSnapshotJoined);
+            return (false, Array.Empty<AgentRunCitedMemory>());
+        }
+
+        return (true, list);
+    }
+
+    /// <summary>
+    /// Parses a single bullet line. Returns <see langword="null"/> on
+    /// malformed shape (caller decides drift-detection semantics). Bullet
+    /// shape: <c>"• Run {first8} {emoji}: {summary} — \"{comment}\""</c>.
+    /// </summary>
+    private static AgentRunCitedMemory? TryParseBulletLine(ReadOnlySpan<char> line)
+    {
+        // "• Run " prefix already established by caller.
+        var afterPrefix = line["• Run ".Length..];
+
+        // {first8} runs until next space.
+        var spaceIdx = afterPrefix.IndexOf(' ');
+        if (spaceIdx <= 0)
+        {
+            return null;
+        }
+        var runIdPrefix = afterPrefix[..spaceIdx].ToString();
+
+        var afterRunId = afterPrefix[(spaceIdx + 1)..];
+
+        // {emoji} runs until ": " separator. BuildMemorySystemMessage emits
+        // the emoji as a single codepoint glyph (👍 / 👎 / •) but in UTF-16
+        // these are surrogate pairs (2 chars) for 👍 / 👎 and 1 char for •.
+        // We grab everything up to ": " conservatively.
+        var colonSepIdx = afterRunId.IndexOf(": ", StringComparison.Ordinal);
+        if (colonSepIdx <= 0)
+        {
+            return null;
+        }
+        var emoji = afterRunId[..colonSepIdx].ToString();
+
+        var afterEmoji = afterRunId[(colonSepIdx + 2)..];
+
+        // Comment suffix is optional. Format: ` — "{comment}"` (em-dash, NOT
+        // ASCII hyphen). When absent, the whole remainder is the summary.
+        // Locate the suffix by searching for ` — "` (space + em-dash + space +
+        // double-quote). The summary itself can contain the em-dash on its own,
+        // so the trailing double-quote at end-of-line is the anchor for "the
+        // suffix is present and well-formed".
+        string? commentSnippet = null;
+        const string CommentSuffixOpen = " — \"";
+        if (afterEmoji.Length > 0
+            && afterEmoji[^1] == '"'
+            && afterEmoji.LastIndexOf(CommentSuffixOpen, StringComparison.Ordinal) is int openIdx
+            && openIdx >= 0)
+        {
+            var commentSpan = afterEmoji[(openIdx + CommentSuffixOpen.Length)..^1];
+            var commentStr = commentSpan.ToString();
+            commentSnippet = commentStr.Length > CommentSnippetMaxChars
+                ? commentStr[..CommentSnippetMaxChars] + "…"
+                : commentStr;
+        }
+
+        return new AgentRunCitedMemory(runIdPrefix, emoji, commentSnippet);
     }
 }

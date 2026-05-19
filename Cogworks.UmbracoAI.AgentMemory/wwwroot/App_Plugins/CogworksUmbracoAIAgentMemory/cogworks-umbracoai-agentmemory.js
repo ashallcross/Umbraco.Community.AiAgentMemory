@@ -1,85 +1,86 @@
-import { css as f, state as h, customElement as y, nothing as u, html as o } from "@umbraco-cms/backoffice/external/lit";
+import { css as f, state as c, customElement as y, nothing as n, html as o } from "@umbraco-cms/backoffice/external/lit";
 import { UmbModalBaseElement as v } from "@umbraco-cms/backoffice/modal";
-import { UMB_AUTH_CONTEXT as p } from "@umbraco-cms/backoffice/auth";
-class d extends Error {
+import { UMB_AUTH_CONTEXT as g } from "@umbraco-cms/backoffice/auth";
+import { UMB_CURRENT_USER_CONTEXT as k } from "@umbraco-cms/backoffice/current-user";
+class h extends Error {
   constructor() {
     super(...arguments), this.name = "AuthContextUnavailableError";
   }
 }
-async function b(t, e, a) {
-  const s = await t();
-  if (!s)
-    throw new d("Auth context unavailable");
-  const r = s.getOpenApiConfiguration();
-  let n;
+async function p(e, t, s) {
+  const i = await e();
+  if (!i)
+    throw new h("Auth context unavailable");
+  const a = i.getOpenApiConfiguration();
+  let r;
   try {
-    n = await r.token();
+    r = await a.token();
   } catch {
-    throw new d("Token acquisition failed");
+    throw new h("Token acquisition failed");
   }
-  if (!n || n.trim() === "")
-    throw new d("Token acquisition returned empty");
-  const c = a.body !== void 0, m = {
+  if (!r || r.trim() === "")
+    throw new h("Token acquisition returned empty");
+  const d = s.body !== void 0, b = {
     Accept: "application/json",
-    Authorization: `Bearer ${n}`,
-    ...c ? { "Content-Type": "application/json" } : {}
-  }, g = { ...a.headers ?? {} };
-  delete g.Authorization, delete g.authorization;
+    Authorization: `Bearer ${r}`,
+    ...d ? { "Content-Type": "application/json" } : {}
+  }, m = { ...s.headers ?? {} };
+  delete m.Authorization, delete m.authorization;
   const _ = {
-    ...m,
-    ...g
+    ...b,
+    ...m
   };
-  return fetch(`${r.base}${e}`, {
-    method: a.method ?? "GET",
-    credentials: r.credentials,
-    signal: a.signal,
+  return fetch(`${a.base}${t}`, {
+    method: s.method ?? "GET",
+    credentials: a.credentials,
+    signal: s.signal,
     headers: _,
-    body: c ? JSON.stringify(a.body) : void 0
+    body: d ? JSON.stringify(s.body) : void 0
   });
 }
-var k = Object.defineProperty, w = Object.getOwnPropertyDescriptor, l = (t, e, a, s) => {
-  for (var r = s > 1 ? void 0 : s ? w(e, a) : e, n = t.length - 1, c; n >= 0; n--)
-    (c = t[n]) && (r = (s ? c(e, a, r) : c(r)) || r);
-  return s && r && k(e, a, r), r;
+var x = Object.defineProperty, w = Object.getOwnPropertyDescriptor, l = (e, t, s, i) => {
+  for (var a = i > 1 ? void 0 : i ? w(t, s) : t, r = e.length - 1, d; r >= 0; r--)
+    (d = e[r]) && (a = (i ? d(t, s, a) : d(a)) || a);
+  return i && a && x(t, s, a), a;
 };
-let i = class extends v {
+let u = class extends v {
   constructor() {
-    super(...arguments), this._score = null, this._comment = "", this._state = "idle", this._errorMessage = "", this._runDetailState = "loading", this._runDetail = null, this._abortController = null, this._runDetailAbortController = null, this._dismiss = () => {
+    super(...arguments), this._score = null, this._comment = "", this._state = "idle", this._errorMessage = "", this._runDetailState = "loading", this._runDetail = null, this._existingFeedbackState = "loading", this._existingFeedback = null, this._currentUserId = null, this._abortController = null, this._runDetailAbortController = null, this._existingFeedbackAbortController = null, this._hasSeededFromExisting = !1, this._currentUserIdReady = null, this._dismiss = () => {
       this._abortController?.abort(), this._rejectModal();
-    }, this._onCommentInput = (t) => {
-      this._comment = t.target.value;
+    }, this._onCommentInput = (e) => {
+      this._comment = e.target.value;
     }, this._submit = async () => {
       if (!this._score)
         return;
-      const t = this.data?.runId ?? "";
-      if (t.length === 0) {
+      const e = this.data?.runId ?? "";
+      if (e.length === 0) {
         this._state = "error", this._errorMessage = "Couldn't load this run's details. Refresh the page and try again.";
         return;
       }
       this._abortController?.abort(), this._abortController = new AbortController(), this._state = "submitting", this._errorMessage = "";
       try {
-        const e = await b(
-          () => this.getContext(p),
+        const t = await p(
+          () => this.getContext(g),
           "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
           {
             method: "POST",
             body: {
-              runId: t,
+              runId: e,
               score: this._score,
               comment: this._comment.length > 0 ? this._comment : null
             },
             signal: this._abortController.signal
           }
         );
-        if (e.ok) {
+        if (t.ok) {
           this._state = "success";
           return;
         }
-        await this._handleHttpError(e);
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError")
+        await this._handleHttpError(t);
+      } catch (t) {
+        if (t instanceof DOMException && t.name === "AbortError")
           return;
-        if (e instanceof d) {
+        if (t instanceof h) {
           this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
           return;
         }
@@ -88,57 +89,119 @@ let i = class extends v {
     };
   }
   connectedCallback() {
-    super.connectedCallback(), this.closest("uui-modal-sidebar")?.setAttribute("size", "small"), this._loadRunDetail();
+    super.connectedCallback(), this.closest("uui-modal-sidebar")?.setAttribute("size", "small"), this._loadRunDetail(), this._currentUserIdReady = this._resolveCurrentUserId(), this._loadExistingFeedback();
   }
   disconnectedCallback() {
-    this._abortController?.abort(), this._runDetailAbortController?.abort(), super.disconnectedCallback();
+    this._abortController?.abort(), this._runDetailAbortController?.abort(), this._existingFeedbackAbortController?.abort(), super.disconnectedCallback();
+  }
+  async _resolveCurrentUserId() {
+    try {
+      const e = await this.getContext(k);
+      this._currentUserId = e?.getUnique() ?? null;
+    } catch {
+      this._currentUserId = null;
+    }
   }
   async _loadRunDetail() {
-    const t = this.data?.runId ?? "";
-    if (t.length === 0) {
+    const e = this.data?.runId ?? "";
+    if (e.length === 0) {
       this._runDetailState = "unavailable";
       return;
     }
     this._runDetailAbortController?.abort();
-    const e = new AbortController();
-    this._runDetailAbortController = e, this._runDetailState = "loading";
+    const t = new AbortController();
+    this._runDetailAbortController = t, this._runDetailState = "loading";
     try {
-      const a = await b(
-        () => this.getContext(p),
-        `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(t)}`,
-        { signal: e.signal }
+      const s = await p(
+        () => this.getContext(g),
+        `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(e)}`,
+        { signal: t.signal }
       );
-      if (e.signal.aborted)
+      if (t.signal.aborted)
         return;
-      if (!a.ok) {
+      if (!s.ok) {
         this._runDetailState = "unavailable";
         return;
       }
-      const s = await a.json();
-      if (e.signal.aborted)
+      const i = await s.json();
+      if (t.signal.aborted)
         return;
-      if (!Array.isArray(s.issues) || !Array.isArray(s.suggestions)) {
+      if (!Array.isArray(i.issues) || !Array.isArray(i.suggestions)) {
         this._runDetailState = "unavailable";
         return;
       }
-      if (s.score === null && s.issues.length === 0 && s.suggestions.length === 0) {
+      if (i.score === null && i.issues.length === 0 && i.suggestions.length === 0 && !i.memoryUsed) {
         this._runDetailState = "unavailable";
         return;
       }
-      this._runDetail = s, this._runDetailState = "loaded";
-    } catch (a) {
-      if (a instanceof DOMException && a.name === "AbortError" || e.signal.aborted)
+      this._runDetail = i, this._runDetailState = "loaded";
+    } catch (s) {
+      if (s instanceof DOMException && s.name === "AbortError" || t.signal.aborted)
         return;
       this._runDetailState = "unavailable";
     }
+  }
+  async _loadExistingFeedback() {
+    const e = this.data?.runId ?? "";
+    if (e.length === 0) {
+      this._existingFeedbackState = "unavailable";
+      return;
+    }
+    this._existingFeedbackAbortController?.abort();
+    const t = new AbortController();
+    this._existingFeedbackAbortController = t, this._existingFeedbackState = "loading";
+    try {
+      const s = await p(
+        () => this.getContext(g),
+        `/umbraco/management/api/v1/cogworks-agent-memory/feedback/${encodeURIComponent(e)}`,
+        { signal: t.signal }
+      );
+      if (t.signal.aborted)
+        return;
+      if (!s.ok) {
+        this._existingFeedbackState = "unavailable";
+        return;
+      }
+      const i = await s.json();
+      if (t.signal.aborted)
+        return;
+      if (!Array.isArray(i.existing)) {
+        this._existingFeedbackState = "unavailable";
+        return;
+      }
+      if (this._existingFeedback = i.existing, this._existingFeedbackState = "loaded", !this._hasSeededFromExisting) {
+        if (this._currentUserIdReady !== null && (await this._currentUserIdReady, t.signal.aborted))
+          return;
+        if (!(this._score !== null || this._comment !== "")) {
+          const r = this._findCurrentUserRow(i.existing);
+          r !== void 0 && (this._score = r.score === "Neutral" ? null : r.score, this._comment = r.comment ?? "");
+        }
+        this._hasSeededFromExisting = !0;
+      }
+    } catch (s) {
+      if (s instanceof DOMException && s.name === "AbortError" || t.signal.aborted)
+        return;
+      this._existingFeedbackState = "unavailable";
+    }
+  }
+  /**
+   * Returns the row whose `createdBy` matches the resolved current-user id.
+   * Returns `undefined` if no current-user-id is available (Task 0h fallback)
+   * OR if no row matches — Submit-disable + Edit gating both treat both
+   * cases as "no existing row for this editor".
+   */
+  _findCurrentUserRow(e) {
+    if (this._currentUserId !== null)
+      return e.find((t) => t.createdBy === this._currentUserId);
   }
   render() {
     return this._state === "success" ? this._renderSuccess() : this._renderForm();
   }
   _renderForm() {
-    const t = this._score !== null, e = !t || this._state === "submitting", a = this._state === "submitting" ? "waiting" : void 0;
+    const e = this._score !== null, t = this._existingFeedback !== null ? this._findCurrentUserRow(this._existingFeedback) : void 0, s = t?.score === "Neutral" ? null : t?.score ?? null, i = t?.comment ?? "", a = t !== void 0 && this._score === s && this._comment === i, r = !e || this._state === "submitting" || a, d = this._state === "submitting" ? "waiting" : void 0;
     return o`
       <umb-body-layout headline="Run Feedback">
+        ${this._renderExistingFeedback()}
         ${this._renderAgentOutput()}
         <uui-box headline="How was this run?">
           <div class="row">
@@ -160,16 +223,16 @@ let i = class extends v {
             </uui-button>
           </div>
 
-          ${t ? o`<uui-textarea
+          ${e ? o`<uui-textarea
                 auto-height
                 label="Optional comment"
                 placeholder="Optional — explain why (helps the agent learn)"
                 maxlength="4000"
                 .value=${this._comment}
                 @input=${this._onCommentInput}
-              ></uui-textarea>` : u}
+              ></uui-textarea>` : n}
 
-          ${this._state === "error" ? this._renderError() : u}
+          ${this._state === "error" ? this._renderError() : n}
         </uui-box>
 
         <div slot="actions">
@@ -185,8 +248,8 @@ let i = class extends v {
             look="primary"
             color="positive"
             label="Submit feedback"
-            ?disabled=${e}
-            state=${a ?? u}
+            ?disabled=${r}
+            state=${d ?? n}
             @click=${this._submit}
           >
             Submit feedback
@@ -198,6 +261,7 @@ let i = class extends v {
   _renderSuccess() {
     return o`
       <umb-body-layout headline="Run Feedback">
+        ${this._renderExistingFeedback()}
         ${this._renderAgentOutput()}
         <uui-box headline="Feedback recorded">
           <p role="status" class="success">Thanks — your feedback was recorded.</p>
@@ -220,6 +284,75 @@ let i = class extends v {
     return o`<p role="alert" class="error">${this._errorMessage}</p>`;
   }
   /**
+   * Story 4.5 Q1 — renders editor feedback rows that already exist for this
+   * run (Previous-feedback block) so the editor sees their (and others')
+   * prior thumbs-up/down + comments. The current user's row carries an Edit
+   * affordance that pre-populates the form for supersede; other editors'
+   * rows render in display-only mode (collegial collaboration framing).
+   *
+   * Render conditions: omitted entirely when state is not "loaded" OR the
+   * `existing` array is empty (no UI noise on the no-prior-feedback case).
+   *
+   * XSS defence pin (Story 4.5 AC11 + Story 2.3 AC9 + Story 4.2 AC6):
+   * comment text + display name render via Lit auto-encoding; no
+   * Lit's raw-HTML directive.
+   */
+  _renderExistingFeedback() {
+    if (this._existingFeedbackState !== "loaded")
+      return n;
+    const e = this._existingFeedback;
+    if (e === null || e.length === 0)
+      return n;
+    const t = this._findCurrentUserRow(e), s = e.filter((a) => a !== t).sort((a, r) => r.createdUtc.localeCompare(a.createdUtc)), i = t !== void 0 ? [t, ...s] : s;
+    return o`
+      <uui-box headline="Previous feedback" class="previous-feedback-box">
+        ${i.map((a) => this._renderExistingFeedbackRow(a, a === t))}
+      </uui-box>
+    `;
+  }
+  _renderExistingFeedbackRow(e, t) {
+    const s = e.score === "ThumbsUp" ? "👍" : e.score === "ThumbsDown" ? "👎" : "•", i = e.createdByDisplayName ?? "An editor";
+    let a = e.createdUtc;
+    try {
+      const r = new Date(e.createdUtc);
+      Number.isNaN(r.getTime()) || (a = r.toLocaleString());
+    } catch {
+    }
+    return o`
+      <div class="previous-feedback-row">
+        <p class="previous-feedback-content">
+          <span class="previous-feedback-emoji" aria-hidden="true">${s}</span>
+          ${e.comment !== null && e.comment.length > 0 ? o`<span class="previous-feedback-comment">${e.comment}</span>` : o`<span class="previous-feedback-no-comment">(no comment)</span>`}
+        </p>
+        <p class="previous-feedback-footer">
+          ${i} · ${a}
+        </p>
+        ${t && e.score !== "Neutral" ? o`<uui-button
+              look="secondary"
+              label="Edit"
+              class="previous-feedback-edit-button"
+              @click=${() => this._onEditClick(e)}
+            >
+              Edit
+            </uui-button>` : n}
+      </div>
+    `;
+  }
+  /**
+   * Story 4.5 AC8.j — Edit-button click pre-populates the form from the
+   * existing-feedback row + acts as the explicit intent signal for
+   * supersede. Submit-disable-on-no-change (AC10) keeps Submit disabled
+   * until the editor actually mutates score or comment from the seeded
+   * values — clicking Edit alone does NOT enable Submit.
+   *
+   * Neutral score is display-only in the existing-feedback block (Story 2.3
+   * widget only emits ThumbsUp / ThumbsDown); Neutral rows do NOT carry an
+   * Edit button per AC8.i so this handler never receives one.
+   */
+  _onEditClick(e) {
+    this._score = e.score === "Neutral" ? null : e.score, this._comment = e.comment ?? "", this._state === "error" && (this._state = "idle", this._errorMessage = "");
+  }
+  /**
    * Story 4.2 — DRIFT-4.1-12 closure. Renders the agent's score / flagged
    * issues / suggestions ABOVE the existing feedback form so the editor sees
    * what they're rating. Three states:
@@ -231,8 +364,8 @@ let i = class extends v {
    *
    * **XSS defence pin (Story 4.2 AC6 + Story 2.3 AC9):** all agent-derived
    * fields render via Lit's automatic template-literal HTML-encoding. The
-   * `unsafeHTML` symbol is NEVER imported in this file — static grep gate at
-   * `grep -r 'unsafeHTML' Client/src/feedback-widget/` returns zero matches.
+   * Lit's raw-HTML directive is NEVER imported in this file — static grep gate
+   * over the directive token returns zero matches.
    */
   _renderAgentOutput() {
     if (this._runDetailState === "loading")
@@ -252,64 +385,93 @@ let i = class extends v {
           </p>
         </uui-box>
       `;
-    const t = this._runDetail, e = t.issues.length > 0, a = t.suggestions.length > 0, s = t.score !== null || e || a;
+    const e = this._runDetail, t = e.issues.length > 0, s = e.suggestions.length > 0, i = e.score !== null || t || s, a = e.memoryUsed && e.citedMemories.length > 0;
     return o`
       <uui-box headline="Agent output" class="agent-output-box">
-        ${t.score !== null ? o`<p class="agent-output-score">
-              Score: <strong>${t.score}</strong>
-            </p>` : u}
-        ${e ? o`
+        ${e.memoryUsed ? o`<uui-tag
+              slot="header-actions"
+              color="positive"
+              class="memory-used-badge"
+            >
+              Memory used
+            </uui-tag>` : n}
+        ${e.score !== null ? o`<p class="agent-output-score">
+              Score: <strong>${e.score}</strong>
+            </p>` : n}
+        ${t ? o`
               <h5 class="agent-output-section-heading">Flagged issues</h5>
               <ul class="agent-output-issues">
-                ${t.issues.map(
+                ${e.issues.map(
       (r) => o`
                     <li>
                       <span class="agent-output-issue-text">${r.text}</span>
                       ${r.reason ? o`<span class="agent-output-issue-reason">
                             — ${r.reason}
-                          </span>` : u}
+                          </span>` : n}
                     </li>
                   `
     )}
               </ul>
-            ` : u}
-        ${a ? o`
+            ` : n}
+        ${s ? o`
               <h5 class="agent-output-section-heading">Suggestions</h5>
               <ul class="agent-output-suggestions">
-                ${t.suggestions.map(
+                ${e.suggestions.map(
       (r) => o`<li>${r}</li>`
     )}
               </ul>
-            ` : u}
-        ${s ? u : o`<p class="agent-output-empty-note">
+            ` : n}
+        ${i ? n : o`<p class="agent-output-empty-note">
               (no structured output captured for this run)
             </p>`}
+        ${a ? o`
+              <details class="cited-memories-details">
+                <summary>
+                  ${e.citedMemories.length === 1 ? "1 memory cited" : `${e.citedMemories.length} memories cited`}
+                </summary>
+                <ul class="cited-memories-list">
+                  ${e.citedMemories.map(
+      (r) => o`
+                      <li class="cited-memory-row">
+                        <span class="cited-memory-run">Run ${r.runIdPrefix}</span>
+                        <span class="cited-memory-emoji" aria-hidden="true">${r.emoji}</span>
+                        ${r.commentSnippet !== null ? o`<span class="cited-memory-snippet">
+                              · "${r.commentSnippet}"
+                            </span>` : o`<span class="cited-memory-no-comment">
+                              · (no comment)
+                            </span>`}
+                      </li>
+                    `
+    )}
+                </ul>
+              </details>
+            ` : n}
       </uui-box>
     `;
   }
-  _selectScore(t) {
-    this._score = t, this._state === "error" && (this._state = "idle", this._errorMessage = "");
+  _selectScore(e) {
+    this._score = e, this._state === "error" && (this._state = "idle", this._errorMessage = "");
   }
-  async _handleHttpError(t) {
-    if (t.status === 401) {
+  async _handleHttpError(e) {
+    if (e.status === 401) {
       this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
       return;
     }
-    if (t.status === 404) {
+    if (e.status === 404) {
       this._state = "error", this._errorMessage = "This run hasn't been audit-logged yet. Wait a moment and try again — or refresh the page if it keeps failing.";
       return;
     }
-    if (t.status === 400) {
+    if (e.status === 400) {
       try {
-        const e = await t.json();
-        if (typeof e?.detail == "string" && e.detail.length > 0) {
-          this._state = "error", this._errorMessage = e.detail;
+        const t = await e.json();
+        if (typeof t?.detail == "string" && t.detail.length > 0) {
+          this._state = "error", this._errorMessage = t.detail;
           return;
         }
-        if (e?.errors && typeof e.errors == "object") {
-          const a = Object.values(e.errors)[0];
-          if (Array.isArray(a) && typeof a[0] == "string") {
-            this._state = "error", this._errorMessage = a[0];
+        if (t?.errors && typeof t.errors == "object") {
+          const s = Object.values(t.errors)[0];
+          if (Array.isArray(s) && typeof s[0] == "string") {
+            this._state = "error", this._errorMessage = s[0];
             return;
           }
         }
@@ -321,7 +483,7 @@ let i = class extends v {
     this._state = "error", this._errorMessage = "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
   }
 };
-i.styles = f`
+u.styles = f`
     :host {
       display: block;
       font-family: var(--uui-font-family);
@@ -419,29 +581,122 @@ i.styles = f`
     .agent-output-issue-reason {
       color: var(--uui-color-text-alt);
     }
+
+    /* Story 4.5 — Previous-feedback block (Q1; AC8) + Memory-used badge + cited memories (Q2a; AC9). */
+    .previous-feedback-box {
+      display: block;
+      margin-bottom: var(--uui-size-space-4);
+    }
+
+    .previous-feedback-row {
+      padding: var(--uui-size-space-2) 0;
+      border-bottom: 1px solid var(--uui-color-border);
+    }
+
+    .previous-feedback-row:last-child {
+      border-bottom: none;
+    }
+
+    .previous-feedback-content {
+      margin: 0 0 var(--uui-size-space-1) 0;
+      display: flex;
+      align-items: flex-start;
+      gap: var(--uui-size-space-2);
+    }
+
+    .previous-feedback-emoji {
+      flex-shrink: 0;
+    }
+
+    .previous-feedback-comment {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .previous-feedback-no-comment {
+      color: var(--uui-color-text-alt);
+      font-style: italic;
+    }
+
+    .previous-feedback-footer {
+      margin: 0 0 var(--uui-size-space-2) 0;
+      color: var(--uui-color-text-alt);
+      font-size: var(--uui-type-small-size, 0.875rem);
+    }
+
+    .previous-feedback-edit-button {
+      margin-top: var(--uui-size-space-1);
+    }
+
+    /* Memory-used badge sits in the agent-output uui-box's header-actions slot. */
+    .memory-used-badge {
+      align-self: center;
+    }
+
+    .cited-memories-details {
+      margin-top: var(--uui-size-space-3);
+      font-size: var(--uui-type-small-size, 0.875rem);
+    }
+
+    .cited-memories-details summary {
+      cursor: pointer;
+      color: var(--uui-color-text-alt);
+      user-select: none;
+    }
+
+    .cited-memories-list {
+      margin: var(--uui-size-space-2) 0 0 0;
+      padding-left: var(--uui-size-space-5);
+    }
+
+    .cited-memory-row {
+      margin-bottom: var(--uui-size-space-1);
+    }
+
+    .cited-memory-run {
+      font-weight: 600;
+    }
+
+    .cited-memory-snippet {
+      color: var(--uui-color-text-alt);
+    }
+
+    .cited-memory-no-comment {
+      color: var(--uui-color-text-alt);
+      font-style: italic;
+    }
   `;
 l([
-  h()
-], i.prototype, "_score", 2);
+  c()
+], u.prototype, "_score", 2);
 l([
-  h()
-], i.prototype, "_comment", 2);
+  c()
+], u.prototype, "_comment", 2);
 l([
-  h()
-], i.prototype, "_state", 2);
+  c()
+], u.prototype, "_state", 2);
 l([
-  h()
-], i.prototype, "_errorMessage", 2);
+  c()
+], u.prototype, "_errorMessage", 2);
 l([
-  h()
-], i.prototype, "_runDetailState", 2);
+  c()
+], u.prototype, "_runDetailState", 2);
 l([
-  h()
-], i.prototype, "_runDetail", 2);
-i = l([
+  c()
+], u.prototype, "_runDetail", 2);
+l([
+  c()
+], u.prototype, "_existingFeedbackState", 2);
+l([
+  c()
+], u.prototype, "_existingFeedback", 2);
+l([
+  c()
+], u.prototype, "_currentUserId", 2);
+u = l([
   y("cogworks-agent-feedback")
-], i);
-const $ = [
+], u);
+const F = [
   {
     type: "modal",
     alias: "Ua.Modal.RunDetail",
@@ -451,6 +706,6 @@ const $ = [
   }
 ];
 export {
-  $ as manifests
+  F as manifests
 };
 //# sourceMappingURL=cogworks-umbracoai-agentmemory.js.map

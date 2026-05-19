@@ -362,7 +362,7 @@ public class MemoryInjectionMiddlewareTests
         var prefix1 = Prefix(memories[0].RunId);
         var prefix2 = Prefix(memories[1].RunId);
         var prefix3 = Prefix(memories[2].RunId);
-        var nl = Environment.NewLine;
+        const string nl = "\n";
         var expected =
             $"Lessons from past runs:{nl}" +
             $"• Run {prefix1} \U0001F44D: summary-up — \"useful\"{nl}" +
@@ -526,7 +526,7 @@ public class MemoryInjectionMiddlewareTests
         await sut.GetResponseAsync(new List<ChatMessage> { new(ChatRole.User, "hi") });
 
         var body = _innerClient.LastReceivedMessages![0].Text;
-        var nl = Environment.NewLine;
+        const string nl = "\n";
         var expected =
             $"Lessons from past runs:{nl}" +
             $"• Run runabc12 \U0001F44D: line1 line2 line3{nl}";
@@ -561,7 +561,7 @@ public class MemoryInjectionMiddlewareTests
         await sut.GetResponseAsync(new List<ChatMessage> { new(ChatRole.User, "hi") });
 
         var body = _innerClient.LastReceivedMessages![0].Text;
-        var nl = Environment.NewLine;
+        const string nl = "\n";
         var expected =
             $"Lessons from past runs:{nl}" +
             $"• Run runcomm1 \U0001F44E: summary — \"comment line 1 comment line 2 comment line 3\"{nl}";
@@ -629,5 +629,158 @@ public class MemoryInjectionMiddlewareTests
         public T Get(string? name) => _value;
         public IDisposable? OnChange(Action<T, string?> listener) => null;
         public void SetCurrentValue(T value) => _value = value;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Story 4.5 DRIFT-4.5-impl-1 — Middleware FeatureType-preservation patch
+    // (architect ratification 2026-05-19 mid-gate). Retriever's embedding
+    // pipeline (Umbraco.AI's ScopedProfileEmbeddingGenerator) mutates the
+    // outer agent scope's profile + feature metadata without snapshot/
+    // restore. The middleware MUST snapshot the 9 profile + feature keys
+    // before the retriever call + restore in `finally` so the wrapped chat
+    // call's audit row captures the agent's identity correctly.
+    // ─────────────────────────────────────────────────────────────────────
+
+    private const string PfxProfileId = "Umbraco.AI.ProfileId";
+    private const string PfxProfileAlias = "Umbraco.AI.ProfileAlias";
+    private const string PfxProfileVersion = "Umbraco.AI.ProfileVersion";
+    private const string PfxProviderId = "Umbraco.AI.ProviderId";
+    private const string PfxModelId = "Umbraco.AI.ModelId";
+    private const string PfxFeatureType = "Umbraco.AI.FeatureType";
+    private const string PfxFeatureId = "Umbraco.AI.FeatureId";
+    private const string PfxFeatureAlias = "Umbraco.AI.FeatureAlias";
+    private const string PfxFeatureVersion = "Umbraco.AI.FeatureVersion";
+
+    private static readonly Guid AgentFeatureId = new("3CF62A06-3FD0-4D67-8B46-E3D3087AEA83");
+    private static readonly Guid ChatProfileId = new("CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC");
+    private static readonly Guid EmbeddingProfileId = new("EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE");
+
+    /// <summary>
+    /// Seeds a runtime context with the full set of agent-scope keys that
+    /// <c>ScopedAIAgent.PopulateScopeContext</c> + <c>ScopedProfileChatClient.PopulateProfileMetadata</c>
+    /// set before our middleware runs. Used by the DRIFT-4.5-impl-1 patch tests
+    /// to assert restoration of all 9 keys.
+    /// </summary>
+    private void SeedAgentScopeContext(Guid agentId)
+    {
+        var context = new AIRuntimeContext(Array.Empty<AIRequestContextItem>());
+        // Agent metadata (ScopedAIAgent.PopulateScopeContext)
+        context.SetValue(AgentIdKey, agentId);
+        context.SetValue(PfxFeatureType, "agent");
+        context.SetValue(PfxFeatureId, AgentFeatureId);
+        context.SetValue(PfxFeatureAlias, "brand-voice-auditor");
+        context.SetValue(PfxFeatureVersion, 1);
+        // Chat profile metadata (ScopedProfileChatClient.PopulateProfileMetadata)
+        context.SetValue(PfxProfileId, ChatProfileId);
+        context.SetValue(PfxProfileAlias, "anthropic-sonnet-4-5");
+        context.SetValue(PfxProfileVersion, 2);
+        context.SetValue(PfxProviderId, "anthropic");
+        context.SetValue(PfxModelId, "claude-sonnet-4-6");
+        _runtimeContextAccessor.Context.Returns(context);
+    }
+
+    [Test]
+    public async Task GetResponseAsync_OptedInAgent_RetrieverMutatesContext_RestoresProfileAndFeatureKeysAfterCall()
+    {
+        // Simulates the upstream defect: when the retriever runs, its embedding
+        // pipeline mutates the outer scope's profile + feature metadata. After
+        // the retriever returns, our middleware MUST have restored all 9 keys
+        // to the agent's identity.
+        _options.EnabledAgents.Add(AgentA);
+        SeedAgentScopeContext(AgentA);
+
+        _retriever.RetrieveSimilarAsync(AgentA, null, Arg.Any<IReadOnlyList<ChatMessage>>(), 5, Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                // Mutate the context inside the retriever's execution — mimics
+                // ScopedProfileEmbeddingGenerator.PopulateProfileMetadata behaviour
+                var ctx = _runtimeContextAccessor.Context;
+                ctx!.SetValue(PfxProfileId, EmbeddingProfileId);
+                ctx.SetValue(PfxProfileAlias, "openai-embedding");
+                ctx.SetValue(PfxProfileVersion, 1);
+                ctx.SetValue(PfxProviderId, "openai");
+                ctx.SetValue(PfxModelId, "text-embedding-3-small");
+                ctx.SetValue(PfxFeatureType, "inline-embedding");
+                ctx.SetValue(PfxFeatureId, Guid.Parse("EB54B2F4-F0CF-BB52-B3C0-E07AB2603298"));
+                ctx.SetValue(PfxFeatureAlias, "cogworks-agent-memory-retriever");
+                ctx.SetValue(PfxFeatureVersion, 1);
+                return Task.FromResult<IReadOnlyList<MemoryEntry>>(Array.Empty<MemoryEntry>());
+            });
+
+        var sut = CreateSut();
+        await sut.GetResponseAsync(new List<ChatMessage> { new(ChatRole.User, "hi") });
+
+        // Verify retriever was called (i.e. we hit the mutation path).
+        await _retriever.Received(1).RetrieveSimilarAsync(AgentA, null, Arg.Any<IReadOnlyList<ChatMessage>>(), 5, Arg.Any<CancellationToken>());
+
+        // The middleware should have restored the agent's identity before the
+        // wrapped chat call ran (in production, this is read by upstream's
+        // AIAuditingChatClient.StartAuditLogAsync; here we just assert the
+        // context state post-execution).
+        var ctxAfter = _runtimeContextAccessor.Context!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(ctxAfter.GetValue<Guid>(PfxProfileId), Is.EqualTo(ChatProfileId), "ProfileId restored.");
+            Assert.That(ctxAfter.GetValue<string>(PfxProfileAlias), Is.EqualTo("anthropic-sonnet-4-5"), "ProfileAlias restored.");
+            Assert.That(ctxAfter.GetValue<int>(PfxProfileVersion), Is.EqualTo(2), "ProfileVersion restored.");
+            Assert.That(ctxAfter.GetValue<string>(PfxProviderId), Is.EqualTo("anthropic"), "ProviderId restored.");
+            Assert.That(ctxAfter.GetValue<string>(PfxModelId), Is.EqualTo("claude-sonnet-4-6"), "ModelId restored.");
+            Assert.That(ctxAfter.GetValue<string>(PfxFeatureType), Is.EqualTo("agent"), "FeatureType restored to 'agent'.");
+            Assert.That(ctxAfter.GetValue<Guid>(PfxFeatureId), Is.EqualTo(AgentFeatureId), "FeatureId restored to agent's GUID.");
+            Assert.That(ctxAfter.GetValue<string>(PfxFeatureAlias), Is.EqualTo("brand-voice-auditor"), "FeatureAlias restored.");
+            Assert.That(ctxAfter.GetValue<int>(PfxFeatureVersion), Is.EqualTo(1), "FeatureVersion restored.");
+        });
+    }
+
+    [Test]
+    public async Task GetResponseAsync_OptedInAgent_RetrieverThrowsAfterMutating_StillRestoresContext()
+    {
+        // NFR-R3 graceful degradation path: when the retriever mutates the
+        // context and then throws, the middleware's `finally` block MUST still
+        // restore the agent's identity so the wrapped chat call's audit row
+        // is correct.
+        _options.EnabledAgents.Add(AgentA);
+        SeedAgentScopeContext(AgentA);
+
+        _retriever.RetrieveSimilarAsync(AgentA, null, Arg.Any<IReadOnlyList<ChatMessage>>(), 5, Arg.Any<CancellationToken>())
+            .Returns<Task<IReadOnlyList<MemoryEntry>>>(callInfo =>
+            {
+                var ctx = _runtimeContextAccessor.Context;
+                ctx!.SetValue(PfxFeatureType, "inline-embedding");
+                ctx.SetValue(PfxProfileAlias, "openai-embedding");
+                throw new InvalidOperationException("retriever boom");
+            });
+
+        var sut = CreateSut();
+        await sut.GetResponseAsync(new List<ChatMessage> { new(ChatRole.User, "hi") });
+
+        var ctxAfter = _runtimeContextAccessor.Context!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(ctxAfter.GetValue<string>(PfxFeatureType), Is.EqualTo("agent"),
+                "FeatureType restored even though retriever threw — finally block executes.");
+            Assert.That(ctxAfter.GetValue<string>(PfxProfileAlias), Is.EqualTo("anthropic-sonnet-4-5"),
+                "ProfileAlias restored even though retriever threw.");
+        });
+    }
+
+    [Test]
+    public async Task GetResponseAsync_OptedOutAgent_DoesNotSnapshotOrTouchContext_AgentScopeUnchanged()
+    {
+        // Pass-through path: opt-in gate filters BEFORE the retriever call,
+        // so the snapshot/restore code path is never reached. The agent scope's
+        // values are preserved trivially.
+        SeedAgentScopeContext(AgentA);
+        // _options.EnabledAgents is empty — agent NOT opted in
+
+        var sut = CreateSut();
+        await sut.GetResponseAsync(new List<ChatMessage> { new(ChatRole.User, "hi") });
+
+        await _retriever.DidNotReceive().RetrieveSimilarAsync(
+            Arg.Any<Guid>(), Arg.Any<Guid?>(), Arg.Any<IReadOnlyList<ChatMessage>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+
+        var ctxAfter = _runtimeContextAccessor.Context!;
+        Assert.That(ctxAfter.GetValue<string>(PfxFeatureType), Is.EqualTo("agent"),
+            "Opt-out path doesn't touch context — agent identity preserved trivially.");
     }
 }

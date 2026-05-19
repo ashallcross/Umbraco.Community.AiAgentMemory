@@ -417,6 +417,23 @@ public class AgentMemoryComposerStartupValidationTests
     }
 
     [Test]
+    public void Compose_StartupValidation_AgentFeedbackReadController_NoCaptiveDependency()
+    {
+        var ctorParams = typeof(AgentFeedbackReadController).GetConstructors()
+            .Single()
+            .GetParameters();
+
+        Assert.That(ctorParams, Has.None.Matches<System.Reflection.ParameterInfo>(p =>
+            p.ParameterType == typeof(EFCoreAgentRunFeedbackRepository)
+            || p.ParameterType == typeof(EFCoreMemoryEntryRepository)
+            || p.ParameterType == typeof(IMemoryEntryRepository)
+            || (p.ParameterType.IsGenericType
+                && p.ParameterType.GetGenericTypeDefinition() == typeof(IEFCoreScopeProvider<>))),
+            "AgentFeedbackReadController must not directly depend on Scoped repositories or "
+            + "IEFCoreScopeProvider<>; it composes only on IAgentFeedbackService + ILogger.");
+    }
+
+    [Test]
     public void Compose_StartupValidation_FeedbackIndexer_NoCaptiveDependency()
     {
         // Story 3.1 AC5 — IFeedbackIndexer → FeedbackIndexer at Singleton

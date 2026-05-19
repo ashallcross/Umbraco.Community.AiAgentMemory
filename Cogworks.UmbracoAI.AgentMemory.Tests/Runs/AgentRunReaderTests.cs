@@ -2,6 +2,7 @@ using Cogworks.UmbracoAI.AgentMemory.Configuration;
 using Cogworks.UmbracoAI.AgentMemory.Runs;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using NSubstitute.ExceptionExtensions;
 using Umbraco.AI.Core.AuditLog;
 using Umbraco.AI.Core.Models;
 
@@ -56,7 +57,8 @@ public class AgentRunReaderTests
         string? errorMessage = null,
         IReadOnlyDictionary<string, string>? metadataOverride = null,
         bool metadataNull = false,
-        bool metadataEmpty = false)
+        bool metadataEmpty = false,
+        string featureType = "agent")
     {
         IReadOnlyDictionary<string, string>? metadata;
         if (metadataNull)
@@ -87,7 +89,7 @@ public class AgentRunReaderTests
             UserId = userId,
             TraceId = traceId,
             Capability = AICapability.Chat,
-            FeatureType = "agent",
+            FeatureType = featureType,
             FeatureId = agentId ?? SampleAgentId,
             FeatureVersion = featureVersion,
             InputTokens = inputTokens,
@@ -569,4 +571,5 @@ public class AgentRunReaderTests
                 "TraceId = first non-null TraceId ordered by StartTime ascending");
         });
     }
+
 }
