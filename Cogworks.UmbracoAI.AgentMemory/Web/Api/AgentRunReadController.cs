@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Umbraco.AI.Agent.Core.Agents;
 using Umbraco.Cms.Api.Common.Attributes;
 using Umbraco.Cms.Api.Management.Controllers;
 using Umbraco.Cms.Api.Management.Routing;
@@ -111,15 +112,19 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
     private const string MemoryInjectionAnchor = "[system] Lessons from past runs:\n";
 
     private readonly IAgentRunReader _runReader;
+    private readonly IAIAgentService _agentService;
     private readonly ILogger<AgentRunReadController> _logger;
 
     public AgentRunReadController(
         IAgentRunReader runReader,
+        IAIAgentService agentService,
         ILogger<AgentRunReadController> logger)
     {
         ArgumentNullException.ThrowIfNull(runReader);
+        ArgumentNullException.ThrowIfNull(agentService);
         ArgumentNullException.ThrowIfNull(logger);
         _runReader = runReader;
+        _agentService = agentService;
         _logger = logger;
     }
 
@@ -184,12 +189,18 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
         var (score, issues, suggestions) = TryParseStructuredOutput(run.ResponseSnapshotJoined);
         var (memoryUsed, citedMemories) = ParseMemoryInjection(run.PromptSnapshotJoined);
 
+        // Story 4.8 — resolve the agent's display name via IAIAgentService so
+        // the Run Detail modal shows e.g. "Brand Voice Auditor" instead of the
+        // pre-Story-4.8 fallback "Agent {agentId-first-8}". Any throw / null /
+        // cancellation degrades to AgentDisplayName = null (widget keeps its
+        // existing fallback). ContentNodeName remains null in v0.1 — separate
+        // concern not in Story 4.8 scope.
+        var agentDisplayName = await ResolveAgentDisplayNameAsync(run.AgentId, cancellationToken).ConfigureAwait(false);
+
         var response = new AgentRunDetailResponse(
             RunId: runId,
             AgentId: run.AgentId,
-            // v0.1 — agent display name + content node name not surfaced
-            // cheaply by IAgentRunReader; widget falls back to "Agent {agentId}".
-            AgentDisplayName: null,
+            AgentDisplayName: agentDisplayName,
             ContentNodeName: null,
             RanAtUtc: run.StartedUtc,
             Score: score,
@@ -199,6 +210,54 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
             CitedMemories: citedMemories);
 
         return Ok(response);
+    }
+
+    /// <summary>
+    /// Story 4.8 — resolves the agent's display name via
+    /// <see cref="IAIAgentService.GetAgentAsync"/> for the supplied
+    /// <paramref name="agentId"/>. Returns <see cref="AIAgent.Name"/> on the
+    /// happy path; <see langword="null"/> if the agent is unknown / deleted or
+    /// the upstream call throws. Cancellation rethrows per ASP.NET Core
+    /// convention.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Single-row lookup, NOT a batch.</b> Spec-locked decision #1 — the
+    /// caller's <see cref="GetAsync"/> projects ONE record (<c>runs[0]</c>),
+    /// so the GroupBy + First dictionary-build pattern from
+    /// <c>AgentFeedbackReadController.ResolveDisplayNamesAsync</c>
+    /// (DRIFT-4.5-impl-2) doesn't apply. Try/catch + OCE-rethrow + Warning-log
+    /// shape is the verbatim adaptation though.
+    /// </para>
+    /// <para>
+    /// <b>NFR-R1 graceful degradation:</b> any non-cancellation throw is
+    /// caught, logged at Warning, and surfaces as <see langword="null"/> so
+    /// the widget renders the pre-Story-4.8 fallback ("Agent {agentId-first-8}").
+    /// Null returns from <see cref="IAIAgentService.GetAgentAsync"/> (agent
+    /// deleted between run-time audit-logging and read-time modal opening) are
+    /// also passed through as <see langword="null"/> without logging — a
+    /// legitimate v0.2 multi-week-adopter signal, not an error.
+    /// </para>
+    /// </remarks>
+    private async Task<string?> ResolveAgentDisplayNameAsync(Guid agentId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var agent = await _agentService.GetAgentAsync(agentId, cancellationToken).ConfigureAwait(false);
+            return agent?.Name;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "AgentRunReadController.ResolveAgentDisplayNameAsync — IAIAgentService.GetAgentAsync threw for AgentId={AgentId}. " +
+                "Row falls back to null display name (widget renders 'Agent <agentId-first-8>'). NFR-R1 graceful degradation.",
+                agentId);
+            return null;
+        }
     }
 
     /// <summary>

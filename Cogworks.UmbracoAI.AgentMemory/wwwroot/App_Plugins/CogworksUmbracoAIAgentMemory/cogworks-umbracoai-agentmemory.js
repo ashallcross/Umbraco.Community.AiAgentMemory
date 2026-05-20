@@ -1,6 +1,6 @@
 import { css as f, state as c, customElement as y, nothing as n, html as o } from "@umbraco-cms/backoffice/external/lit";
 import { UmbModalBaseElement as v } from "@umbraco-cms/backoffice/modal";
-import { UMB_AUTH_CONTEXT as g } from "@umbraco-cms/backoffice/auth";
+import { UMB_AUTH_CONTEXT as m } from "@umbraco-cms/backoffice/auth";
 import { UMB_CURRENT_USER_CONTEXT as k } from "@umbraco-cms/backoffice/current-user";
 class h extends Error {
   constructor() {
@@ -24,11 +24,11 @@ async function p(e, t, s) {
     Accept: "application/json",
     Authorization: `Bearer ${r}`,
     ...d ? { "Content-Type": "application/json" } : {}
-  }, m = { ...s.headers ?? {} };
-  delete m.Authorization, delete m.authorization;
+  }, g = { ...s.headers ?? {} };
+  delete g.Authorization, delete g.authorization;
   const _ = {
     ...b,
-    ...m
+    ...g
   };
   return fetch(`${a.base}${t}`, {
     method: s.method ?? "GET",
@@ -60,7 +60,7 @@ let u = class extends v {
       this._abortController?.abort(), this._abortController = new AbortController(), this._state = "submitting", this._errorMessage = "";
       try {
         const t = await p(
-          () => this.getContext(g),
+          () => this.getContext(m),
           "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
           {
             method: "POST",
@@ -113,7 +113,7 @@ let u = class extends v {
     this._runDetailAbortController = t, this._runDetailState = "loading";
     try {
       const s = await p(
-        () => this.getContext(g),
+        () => this.getContext(m),
         `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(e)}`,
         { signal: t.signal }
       );
@@ -152,7 +152,7 @@ let u = class extends v {
     this._existingFeedbackAbortController = t, this._existingFeedbackState = "loading";
     try {
       const s = await p(
-        () => this.getContext(g),
+        () => this.getContext(m),
         `/umbraco/management/api/v1/cogworks-agent-memory/feedback/${encodeURIComponent(e)}`,
         { signal: t.signal }
       );
@@ -395,6 +395,9 @@ let u = class extends v {
             >
               Memory used
             </uui-tag>` : n}
+        <p class="agent-output-identity">
+          ${e.agentDisplayName ?? `Agent ${e.agentId.slice(0, 8)}`}
+        </p>
         ${e.score !== null ? o`<p class="agent-output-score">
               Score: <strong>${e.score}</strong>
             </p>` : n}
@@ -559,6 +562,15 @@ u.styles = f`
 
     .agent-output-score {
       margin: 0 0 var(--uui-size-space-3) 0;
+    }
+
+    /* Story 4.8 — agent attribution line above the score. Falls back to
+       "Agent {first-8-of-guid}" when AgentDisplayName is null (NFR-R1
+       graceful degradation from IAIAgentService.GetAgentAsync). */
+    .agent-output-identity {
+      margin: 0 0 var(--uui-size-space-2) 0;
+      font-weight: 600;
+      color: var(--uui-color-text-alt);
     }
 
     .agent-output-section-heading {

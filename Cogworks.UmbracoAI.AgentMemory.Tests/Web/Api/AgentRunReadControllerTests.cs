@@ -3,6 +3,7 @@ using Cogworks.UmbracoAI.AgentMemory.Web.Api;
 using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Umbraco.AI.Agent.Core.Agents;
 
 namespace Cogworks.UmbracoAI.AgentMemory.Tests.Web.Api;
 
@@ -17,6 +18,7 @@ namespace Cogworks.UmbracoAI.AgentMemory.Tests.Web.Api;
 public class AgentRunReadControllerTests
 {
     private IAgentRunReader _runReader = null!;
+    private IAIAgentService _agentService = null!;
     private ILogger<AgentRunReadController> _logger = null!;
     private AgentRunReadController _controller = null!;
     private Guid _agentId;
@@ -27,10 +29,19 @@ public class AgentRunReadControllerTests
     public void SetUp()
     {
         _runReader = Substitute.For<IAgentRunReader>();
+        _agentService = Substitute.For<IAIAgentService>();
         _logger = Substitute.For<ILogger<AgentRunReadController>>();
         _agentId = Guid.NewGuid();
 
-        _controller = new AgentRunReadController(_runReader, _logger);
+        // Story 4.8 — default agent-service substitute returns null so all
+        // pre-Story-4.8 tests assert against the same `AgentDisplayName == null`
+        // contract they were pinned at (AC3.e option (i) — minimum-mutation).
+        // Tests that exercise the happy path / throw path / OCE path override
+        // this default per-test.
+        _agentService.GetAgentAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AIAgent?>(null));
+
+        _controller = new AgentRunReadController(_runReader, _agentService, _logger);
     }
 
     [TearDown]
@@ -544,6 +555,122 @@ public class AgentRunReadControllerTests
             Assert.That(response.CitedMemories, Has.Count.EqualTo(1));
             Assert.That(response.CitedMemories[0].CommentSnippet, Is.Null);
         });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Story 4.8 AC3 — AgentDisplayName resolution via IAIAgentService
+    // happy + null + throw + OCE
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Test]
+    public async Task GetAsync_AgentExists_PopulatesAgentDisplayName()
+    {
+        // AC3.a — happy path. Stubbed IAIAgentService returns the canonical
+        // demo agent shape (Name = "Brand Voice Auditor" per
+        // templates/brand-audit/agent.json).
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null) }));
+        _agentService.GetAgentAsync(_agentId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AIAgent?>(new AIAgent
+            {
+                Alias = "brand-voice-auditor",
+                Name = "Brand Voice Auditor",
+            }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.That(response!.AgentDisplayName, Is.EqualTo("Brand Voice Auditor"));
+    }
+
+    [Test]
+    public async Task GetAsync_AgentDeleted_FallsBackToNullDisplayName()
+    {
+        // AC3.b — override path. IAIAgentService returns null (agent deleted
+        // between run-time audit-logging and read-time modal opening — a
+        // legitimate v0.2 multi-week-adopter signal, not an error). 200 OK +
+        // other fields populated; widget falls back to "Agent {agentId}".
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null) }));
+        _agentService.GetAgentAsync(_agentId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AIAgent?>(null));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var ok = result as OkObjectResult;
+        Assert.That(ok, Is.Not.Null);
+        var response = ok!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.AgentDisplayName, Is.Null);
+            Assert.That(response.RunId, Is.EqualTo(DefaultRunId));
+            Assert.That(response.AgentId, Is.EqualTo(_agentId));
+        });
+        // No Warning log emitted on the legitimate-null branch — null is a
+        // valid signal, not an error condition.
+        _logger.DidNotReceive().Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception?>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Test]
+    public async Task GetAsync_AgentServiceThrows_FallsBackToNullDisplayName_LogsWarning()
+    {
+        // AC3.c — edge: transient throw from IAIAgentService. NFR-R1 graceful
+        // degradation per Story 4.8 § Locked decision 3 (mirror of
+        // AgentFeedbackReadController.ResolveDisplayNamesAsync). 200 OK +
+        // AgentDisplayName = null + Warning log emitted.
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null) }));
+        _agentService.GetAgentAsync(_agentId, Arg.Any<CancellationToken>())
+            .Returns<Task<AIAgent?>>(_ => throw new InvalidOperationException("simulated transient"));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var ok = result as OkObjectResult;
+        Assert.That(ok, Is.Not.Null,
+            "Throws from IAIAgentService degrade gracefully — endpoint still returns 200 OK.");
+        var response = ok!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.That(response!.AgentDisplayName, Is.Null);
+        _logger.Received(1).Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception?>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Test]
+    public void GetAsync_AgentServiceCancelled_RethrowsOperationCanceledException()
+    {
+        // AC3.d — edge: cancellation. OperationCanceledException MUST NOT be
+        // swallowed by the catch-Exception arm of ResolveAgentDisplayNameAsync
+        // (verbatim shape mirror of AgentFeedbackReadController.ResolveDisplayNamesAsync
+        // OCE-rethrow contract). The CT-rethrow contract is genuinely
+        // load-bearing here — unlike IUserService.GetAsync(IEnumerable<Guid>)
+        // which has no CT overload in 17.3.2 (deferred-work.md line 417),
+        // IAIAgentService.GetAgentAsync DOES accept a CT param (line 22 of the
+        // upstream interface).
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null) }));
+        _agentService.GetAgentAsync(_agentId, Arg.Any<CancellationToken>())
+            .Returns<Task<AIAgent?>>(_ => throw new OperationCanceledException(cts.Token));
+
+        Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await _controller.GetAsync(DefaultRunId, cts.Token));
     }
 
     // ─────────────────────────────────────────────────────────────────────

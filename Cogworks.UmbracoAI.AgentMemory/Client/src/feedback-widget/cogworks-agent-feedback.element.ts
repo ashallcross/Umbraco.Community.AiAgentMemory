@@ -678,6 +678,9 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
               Memory used
             </uui-tag>`
           : nothing}
+        <p class="agent-output-identity">
+          ${detail.agentDisplayName ?? `Agent ${detail.agentId.slice(0, 8)}`}
+        </p>
         ${detail.score !== null
           ? html`<p class="agent-output-score">
               Score: <strong>${detail.score}</strong>
@@ -970,6 +973,15 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
 
     .agent-output-score {
       margin: 0 0 var(--uui-size-space-3) 0;
+    }
+
+    /* Story 4.8 — agent attribution line above the score. Falls back to
+       "Agent {first-8-of-guid}" when AgentDisplayName is null (NFR-R1
+       graceful degradation from IAIAgentService.GetAgentAsync). */
+    .agent-output-identity {
+      margin: 0 0 var(--uui-size-space-2) 0;
+      font-weight: 600;
+      color: var(--uui-color-text-alt);
     }
 
     .agent-output-section-heading {
