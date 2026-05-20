@@ -396,7 +396,7 @@ let u = class extends v {
               Memory used
             </uui-tag>` : n}
         <p class="agent-output-identity">
-          ${e.agentDisplayName ?? `Agent ${e.agentId.slice(0, 8)}`}
+          ${e.agentDisplayName ?? `Agent ${e.agentId?.slice(0, 8) ?? "unknown"}`}
         </p>
         ${e.score !== null ? o`<p class="agent-output-score">
               Score: <strong>${e.score}</strong>

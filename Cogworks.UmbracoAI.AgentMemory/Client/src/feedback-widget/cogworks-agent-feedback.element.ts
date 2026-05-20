@@ -679,7 +679,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
             </uui-tag>`
           : nothing}
         <p class="agent-output-identity">
-          ${detail.agentDisplayName ?? `Agent ${detail.agentId.slice(0, 8)}`}
+          ${detail.agentDisplayName ?? `Agent ${detail.agentId?.slice(0, 8) ?? "unknown"}`}
         </p>
         ${detail.score !== null
           ? html`<p class="agent-output-score">

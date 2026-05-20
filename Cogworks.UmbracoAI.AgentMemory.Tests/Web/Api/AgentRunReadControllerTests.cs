@@ -626,7 +626,10 @@ public class AgentRunReadControllerTests
         // AC3.c — edge: transient throw from IAIAgentService. NFR-R1 graceful
         // degradation per Story 4.8 § Locked decision 3 (mirror of
         // AgentFeedbackReadController.ResolveDisplayNamesAsync). 200 OK +
-        // AgentDisplayName = null + Warning log emitted.
+        // AgentDisplayName = null + Warning log emitted. Log-state assertion
+        // pins the AgentId stringification so a future refactor that drops
+        // the {AgentId} placeholder from the LogWarning call would fail this
+        // test rather than silently degrade ops diagnostics.
         _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
                 new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null) }));
@@ -644,7 +647,7 @@ public class AgentRunReadControllerTests
         _logger.Received(1).Log(
             LogLevel.Warning,
             Arg.Any<EventId>(),
-            Arg.Any<object>(),
+            Arg.Is<object>(state => state != null && state.ToString()!.Contains(_agentId.ToString())),
             Arg.Any<Exception?>(),
             Arg.Any<Func<object, Exception?, string>>());
     }
@@ -660,6 +663,12 @@ public class AgentRunReadControllerTests
         // which has no CT overload in 17.3.2 (deferred-work.md line 417),
         // IAIAgentService.GetAgentAsync DOES accept a CT param (line 22 of the
         // upstream interface).
+        //
+        // Review-patch: stub the substitute to return Task.FromCanceled<T>
+        // rather than throwing synchronously from the substitute factory.
+        // The synchronous-throw form would pass even if the controller
+        // stripped its ConfigureAwait or wrapped OCE in AggregateException;
+        // the cancelled-task form exercises the actual awaited-throw path.
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
@@ -667,10 +676,70 @@ public class AgentRunReadControllerTests
             .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
                 new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null) }));
         _agentService.GetAgentAsync(_agentId, Arg.Any<CancellationToken>())
-            .Returns<Task<AIAgent?>>(_ => throw new OperationCanceledException(cts.Token));
+            .Returns(Task.FromCanceled<AIAgent?>(cts.Token));
 
-        Assert.ThrowsAsync<OperationCanceledException>(
+        // CatchAsync (not ThrowsAsync) — Task.FromCanceled<T> resolves to
+        // TaskCanceledException, which derives from OperationCanceledException.
+        // ThrowsAsync requires exact type match; CatchAsync accepts derived
+        // types, which is what "the catch arm does not swallow OCE" actually
+        // means in production (the catch arm is `catch (OperationCanceledException)`,
+        // matching both the base and its TaskCanceledException subtype).
+        Assert.CatchAsync<OperationCanceledException>(
             async () => await _controller.GetAsync(DefaultRunId, cts.Token));
+    }
+
+    [Test]
+    public async Task GetAsync_AgentIdIsGuidEmpty_ShortCircuitsToNullDisplayNameWithoutCallingAgentService()
+    {
+        // Review-patch (decision #2): defensive short-circuit for unresolved
+        // AgentId. If the audit-log middleware ever stamps Guid.Empty (an
+        // upstream defect that has been observed historically), the helper
+        // must skip the upstream call entirely rather than emit a Warning per
+        // modal open. Pins both the null response AND the absence of the
+        // upstream invocation.
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(Guid.Empty, responseSnapshotJoined: null) }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.That(response!.AgentDisplayName, Is.Null);
+        await _agentService.DidNotReceive().GetAgentAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        _logger.DidNotReceive().Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception?>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Test]
+    public async Task GetAsync_AgentNameIsWhitespaceOnly_NormalisesToNullDisplayName()
+    {
+        // Review-patch (decision #1): server-side normalisation. A misconfigured
+        // or imported agent with an empty/whitespace-only Name would otherwise
+        // surface as AgentDisplayName == "" — the widget's nullish-coalesce
+        // operator only catches null/undefined, so an empty string would render
+        // a blank attribution line rather than the "Agent {first-8}" fallback.
+        // Server trims + coerces empty → null to keep the API contract clean.
+        _runReader.GetRunsForThreadAsync(DefaultRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(
+                new[] { MakeRunRecord(_agentId, responseSnapshotJoined: null) }));
+        _agentService.GetAgentAsync(_agentId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AIAgent?>(new AIAgent
+            {
+                Alias = "misconfigured",
+                Name = "   ",
+            }));
+
+        var result = await _controller.GetAsync(DefaultRunId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.That(response!.AgentDisplayName, Is.Null,
+            "Whitespace-only Name normalises to null so the widget falls through to the GUID-prefix display.");
     }
 
     // ─────────────────────────────────────────────────────────────────────

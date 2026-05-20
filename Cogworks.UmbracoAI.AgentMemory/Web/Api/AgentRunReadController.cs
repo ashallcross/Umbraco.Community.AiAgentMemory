@@ -238,13 +238,28 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
     /// also passed through as <see langword="null"/> without logging — a
     /// legitimate v0.2 multi-week-adopter signal, not an error.
     /// </para>
+    /// <para>
+    /// <b>Input/output normalisation:</b> <see cref="Guid.Empty"/> short-circuits
+    /// to <see langword="null"/> without calling upstream (defensive against
+    /// audit-log records with an unresolved AgentId — avoids per-modal-open log
+    /// noise from upstream throws on empty Guid). Whitespace-only / empty
+    /// <see cref="AIAgent.Name"/> values are normalised to <see langword="null"/>
+    /// so the widget falls through to its GUID-prefix fallback rather than
+    /// rendering a blank attribution line.
+    /// </para>
     /// </remarks>
     private async Task<string?> ResolveAgentDisplayNameAsync(Guid agentId, CancellationToken cancellationToken)
     {
+        if (agentId == Guid.Empty)
+        {
+            return null;
+        }
+
         try
         {
             var agent = await _agentService.GetAgentAsync(agentId, cancellationToken).ConfigureAwait(false);
-            return agent?.Name;
+            var name = agent?.Name?.Trim();
+            return string.IsNullOrEmpty(name) ? null : name;
         }
         catch (OperationCanceledException)
         {
