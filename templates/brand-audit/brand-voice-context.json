@@ -1,0 +1,19 @@
+{
+  "alias": "northwind-trails-brand-voice",
+  "name": "Northwind Trails Brand Voice",
+  "resources": [
+    {
+      "description": null,
+      "injectionMode": "Always",
+      "name": "Brand Voice",
+      "resourceTypeId": "brand-voice",
+      "settings": {
+        "toneDescription": "Confident, grounded, place-rooted. Northwind Trails writes about expeditions with deep respect for the land. The voice is warm but practical — never breezy, never marketing-glib.",
+        "targetAudience": "Adventure enthusiasts considering booking an expedition. Editorial readers who expect substance, not hype. Mostly UK & European, often returning customers familiar with the brand.",
+        "styleGuidelines": "Use active voice. Lead with concrete sensory detail. Be specific about places, conditions, expertise. Use first-person when describing guide experience. Cite specific years, regions, mountain names.",
+        "avoidPatterns": "Informal colloquialism. Generic marketing phrasing. Over-use of exclamation marks. Vague claims about 'adventure' or 'experience' without specifics. Corporate buzzwords."
+      },
+      "sortOrder": 0
+    }
+  ]
+}

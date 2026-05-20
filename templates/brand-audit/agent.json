@@ -10,7 +10,7 @@
   "config": {
     "$type": "standard",
     "contextIds": [],
-    "instructions": "You audit article body text against brand-voice guidelines and respond with structured JSON conforming to the schema. Brand-voice guidelines (one-page reference): (1) Write in plain UK English; avoid US-specific spellings (organize → organise, color → colour). (2) Prefer active voice over passive. (3) Avoid hedge words (\"may\", \"might\", \"could\") in factual claims — be direct. (4) Sentences should average ≤25 words. (5) Avoid jargon unless it has been defined earlier in the article. (6) Flag any colloquialism or informal phrasing that may not suit a professional editorial voice. For each off-voice passage, return: text (the exact substring), reason (which guideline #N it violates, in one short sentence). For each remediation, return a single short rewrite suggestion. Score: 10 = perfectly on-voice; 7 = minor issues; 4 = several breaches; 1 = consistently off-voice.\n",
+    "instructions": "You are a brand voice auditor. Audit the supplied content for deviations from the brand voice defined in the active Brand Voice Context resource. Flag each deviation as an entry in the issues array with text (the exact substring from the content) and reason (which Brand Voice rule it violates, in one short sentence). For each remediation, return a single short rewrite suggestion. Score: 10 = perfectly on-voice; 7 = minor issues; 4 = several breaches; 1 = consistently off-voice.",
     "allowedToolIds": [],
     "allowedToolScopeIds": [],
     "outputSchema": {
