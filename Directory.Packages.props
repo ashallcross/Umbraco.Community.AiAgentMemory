@@ -40,7 +40,7 @@
          at commit gc1456d0 (the same Fork (i) PR that fixed AI.Agent.Metadata).
          When the PR lands upstream, Umbraco.Automate floats back to the public
          nightly feed (preview.374+) and AI.Automate floats to nuget.org. -->
-    <PackageVersion Include="Umbraco.Automate" Version="0.1.0--preview.374.g65a8eb6" />
+    <PackageVersion Include="Umbraco.Automate" Version="0.1.0--preview.422.g8a1061d" />
     <PackageVersion Include="Umbraco.AI.Automate" Version="1.0.0--alpha1.preview.113.gad0117f" />
 
     <!-- 2026-05-13 Story 2.3 Task 6 — explicit EF Core floor pin. The fork's

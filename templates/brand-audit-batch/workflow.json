@@ -1,0 +1,160 @@
+{
+  "automation": {
+    "alias": "brand-voice-audit-batch-demo",
+    "name": "Brand Voice Audit Batch Demo",
+    "description": "Audits every article matching the configured name prefix against the Brand Voice Auditor's guidelines + memory loop. Iterates sequentially over the matched collection; each iteration audits one article. Demonstrates the memory loop's cross-article learning effect: teach via feedback on 2-3 articles between batch runs, observe flag-count drop across the batch on the next trigger.",
+    "trigger": {
+      "triggerAlias": "umbracoAutomate.manual",
+      "settings": {}
+    },
+    "steps": [
+      {
+        "id": "3e67ff83-516a-4d29-a1c8-daec55307c64",
+        "actionAlias": "umbracoAutomate.findContent",
+        "name": "Find Content",
+        "alias": "findContent",
+        "connectionId": null,
+        "settings": {
+          "name": "idiomatic",
+          "contentTypes": "0f63b49a-5423-46bd-91fa-0e78bbd2f6d6",
+          "matchMode": "StartsWith",
+          "culture": null,
+          "includeUnpublished": false,
+          "limit": 50
+        },
+        "inputMappings": {},
+        "position": {
+          "x": 219.1845793298873,
+          "y": 153.0261073433251
+        },
+        "errorBehavior": 2,
+        "retryInterval": null,
+        "maxRetries": null
+      },
+      {
+        "id": "bd31c282-8e70-4d98-8220-c33bd2c4221e",
+        "actionAlias": "umbracoAutomate.forEach",
+        "name": "For Each",
+        "alias": "forEach",
+        "connectionId": null,
+        "settings": {
+          "collection": "${ steps.findContent.matches }",
+          "runParallel": false
+        },
+        "inputMappings": {},
+        "position": {
+          "x": 218.35389314358696,
+          "y": 304.0555753900238
+        },
+        "errorBehavior": 2,
+        "retryInterval": null,
+        "maxRetries": null
+      },
+      {
+        "id": "4af1bbd4-bd97-41eb-9e99-972e2e50972a",
+        "actionAlias": "umbracoAI.runAgent",
+        "name": "Run AI Agent",
+        "alias": "runAgent",
+        "connectionId": null,
+        "settings": {
+          "agentId": "3cf62a06-3fd0-4d67-8b46-e3d3087aea83",
+          "message": "${ steps.getContent.properties.contentRows[0].content.content | stripHtml }"
+        },
+        "inputMappings": {},
+        "position": {
+          "x": 213.5699554729659,
+          "y": 666.0246074444345
+        },
+        "errorBehavior": 2,
+        "retryInterval": null,
+        "maxRetries": null
+      },
+      {
+        "id": "647461c1-3599-4865-bda5-a739530e319c",
+        "actionAlias": "umbracoAutomate.getContent",
+        "name": "Get Content",
+        "alias": "getContent",
+        "connectionId": null,
+        "settings": {
+          "contentKey": "${ loop.item.contentKey }",
+          "culture": null
+        },
+        "inputMappings": {},
+        "position": {
+          "x": 218.35389314358696,
+          "y": 470.01901574772023
+        },
+        "errorBehavior": 2,
+        "retryInterval": null,
+        "maxRetries": null
+      },
+      {
+        "id": "f97a55eb-d1e4-435f-a7a1-44a2fab95100",
+        "actionAlias": "umbracoAutomate.notifyEditor",
+        "name": "Notify Editor",
+        "alias": "notifyEditor",
+        "connectionId": null,
+        "settings": {
+          "contentKey": "${ loop.item.contentKey }",
+          "title": "Brand voice audit complete",
+          "message": "The Brand Voice Auditor has reviewed this article. Open the Run Detail panel to see flagged passages and submit feedback.",
+          "severity": "Default"
+        },
+        "inputMappings": {},
+        "position": {
+          "x": 213.5699554729659,
+          "y": 846.0246074444345
+        },
+        "errorBehavior": 2,
+        "retryInterval": null,
+        "maxRetries": null
+      }
+    ],
+    "connections": [
+      {
+        "sourceStepId": "00000000-0000-0000-0000-000000000000",
+        "sourceHandle": null,
+        "targetStepId": "3e67ff83-516a-4d29-a1c8-daec55307c64",
+        "targetHandle": null,
+        "outcome": null,
+        "filter": null
+      },
+      {
+        "sourceStepId": "3e67ff83-516a-4d29-a1c8-daec55307c64",
+        "sourceHandle": null,
+        "targetStepId": "bd31c282-8e70-4d98-8220-c33bd2c4221e",
+        "targetHandle": null,
+        "outcome": null,
+        "filter": null
+      },
+      {
+        "sourceStepId": "bd31c282-8e70-4d98-8220-c33bd2c4221e",
+        "sourceHandle": null,
+        "targetStepId": "647461c1-3599-4865-bda5-a739530e319c",
+        "targetHandle": null,
+        "outcome": null,
+        "filter": null
+      },
+      {
+        "sourceStepId": "647461c1-3599-4865-bda5-a739530e319c",
+        "sourceHandle": null,
+        "targetStepId": "4af1bbd4-bd97-41eb-9e99-972e2e50972a",
+        "targetHandle": null,
+        "outcome": null,
+        "filter": null
+      },
+      {
+        "sourceStepId": "4af1bbd4-bd97-41eb-9e99-972e2e50972a",
+        "sourceHandle": null,
+        "targetStepId": "f97a55eb-d1e4-435f-a7a1-44a2fab95100",
+        "targetHandle": null,
+        "outcome": null,
+        "filter": null
+      }
+    ],
+    "canvasState": "{\"viewport\":{\"x\":176.89010923485768,\"y\":-315.3372540019413,\"zoom\":0.712425284744406},\"triggerPosition\":{\"x\":250,\"y\":50}}",
+    "notificationSettings": null
+  },
+  "connectionReferences": [],
+  "formatVersion": "1.0"
+}
