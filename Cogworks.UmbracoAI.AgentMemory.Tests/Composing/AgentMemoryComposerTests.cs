@@ -368,6 +368,9 @@ public class AgentMemoryComposerStartupValidationTests
         Assert.That(allowedControllers, Does.Contain(typeof(AgentRunReadController)),
             "New Management-API controllers must be added to the operation-id allow-list "
             + "or Swagger generation falls back to the framework's default operation ids.");
+        Assert.That(allowedControllers, Does.Contain(typeof(MemoryEntriesReadController)),
+            "Story 4.9 — MemoryEntriesReadController must be in the operation-id allow-list "
+            + "to avoid Swagger duplicate-operation-id boot crash.");
     }
 
     [Test]

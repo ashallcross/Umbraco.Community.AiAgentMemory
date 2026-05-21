@@ -3,16 +3,32 @@ using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
 namespace Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
 
 /// <summary>
-/// Read/write surface over <see cref="MemoryEntryEntity"/>. Internal-visibility
-/// interface introduced at Story 3.1 so the Singleton
-/// <see cref="Memory.FeedbackIndexer"/> can mock it in unit tests
-/// (<see cref="EFCoreMemoryEntryRepository"/> is <c>sealed</c> — NSubstitute
-/// proxies by inheritance and cannot substitute a sealed type, so the interface
-/// is the canonical seam for test doubles). Story 3.2's
-/// <c>SemanticMemoryRetriever</c> also consumes via this interface for
-/// forward-compat.
+/// Read/write surface over <see cref="MemoryEntryEntity"/>. Introduced at
+/// Story 3.1 so the Singleton <see cref="Memory.FeedbackIndexer"/> can mock
+/// it in unit tests (<see cref="EFCoreMemoryEntryRepository"/> is
+/// <c>sealed</c> — NSubstitute proxies by inheritance and cannot substitute
+/// a sealed type, so the interface is the canonical seam for test doubles).
+/// Story 3.2's <c>SemanticMemoryRetriever</c> also consumes via this
+/// interface for forward-compat.
 /// </summary>
-internal interface IMemoryEntryRepository
+/// <remarks>
+/// <para>
+/// <b>Visibility (Story 4.9 DRIFT-4.9-1):</b> originally declared
+/// <c>internal interface</c> at Story 3.1 because all consumers were
+/// internal (<c>FeedbackIndexer</c>, <c>SemanticMemoryRetriever</c>).
+/// Story 4.9 introduces a public Management-API consumer
+/// (<c>MemoryEntriesReadController</c>) which forces the interface up to
+/// <c>public</c> per ASP.NET MVC's accessibility rule — a public controller
+/// cannot inject an internal interface. Matches the visibility of sibling
+/// services <c>IAgentFeedbackService</c> + <c>IAgentRunReader</c> (both
+/// public for the same reason). Adopters now have type-level visibility of
+/// the interface but cannot construct
+/// <see cref="EFCoreMemoryEntryRepository"/> (still
+/// <c>internal sealed</c>), and registration stays package-private via
+/// <c>AgentMemoryComposer</c>.
+/// </para>
+/// </remarks>
+public interface IMemoryEntryRepository
 {
     /// <summary>
     /// Returns the entry keyed by <paramref name="runId"/> +
@@ -58,6 +74,18 @@ internal interface IMemoryEntryRepository
     /// </summary>
     Task<IReadOnlyList<MemoryEntryEntity>> GetRecentByAgentIdAsync(
         Guid agentId,
+        int take,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns up to <paramref name="take"/> most-recent entries across ALL
+    /// agents, ordered by <c>CreatedUtc</c> descending. <paramref name="take"/>
+    /// clamps to the inclusive range <c>[0, 100]</c> non-throwingly:
+    /// <c>&lt;= 0</c> returns empty list; <c>&gt; 100</c> clamps to 100.
+    /// Story 4.9 Learning Wall consumer — mirrors
+    /// <see cref="GetRecentByAgentIdAsync"/>'s shape minus the agent filter.
+    /// </summary>
+    Task<IReadOnlyList<MemoryEntryEntity>> GetRecentAcrossAgentsAsync(
         int take,
         CancellationToken cancellationToken);
 }

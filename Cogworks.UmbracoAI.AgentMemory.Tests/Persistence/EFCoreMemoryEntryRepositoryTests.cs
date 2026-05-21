@@ -181,6 +181,73 @@ public class EFCoreMemoryEntryRepositoryTests
         Assert.That(result, Has.Count.EqualTo(expectedCount));
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Story 4.9 AC7.a — GetRecentAcrossAgentsAsync (Learning Wall consumer)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Test]
+    public async Task GetRecentAcrossAgentsAsync_MultipleAgents_OrdersByCreatedUtcDescAcrossAgents()
+    {
+        // Seed 5 entries across 3 agents with distinct CreatedUtc so the
+        // ordering assertion is non-trivial (interleaved across agents).
+        var agentA = Guid.NewGuid();
+        var agentB = Guid.NewGuid();
+        var agentC = Guid.NewGuid();
+        await _repository.AddAsync(
+            Entry("run-1", agentA, createdUtc: FixedUtcNow.AddSeconds(1)), CancellationToken.None);
+        await _repository.AddAsync(
+            Entry("run-2", agentB, createdUtc: FixedUtcNow.AddSeconds(2)), CancellationToken.None);
+        await _repository.AddAsync(
+            Entry("run-3", agentC, createdUtc: FixedUtcNow.AddSeconds(3)), CancellationToken.None);
+        await _repository.AddAsync(
+            Entry("run-4", agentA, createdUtc: FixedUtcNow.AddSeconds(4)), CancellationToken.None);
+        await _repository.AddAsync(
+            Entry("run-5", agentB, createdUtc: FixedUtcNow.AddSeconds(5)), CancellationToken.None);
+
+        var rows = await _repository.GetRecentAcrossAgentsAsync(10, CancellationToken.None);
+
+        Assert.That(rows, Has.Count.EqualTo(5));
+        Assert.Multiple(() =>
+        {
+            Assert.That(rows[0].RunId, Is.EqualTo("run-5"), "Most-recent entry first regardless of agent");
+            Assert.That(rows[1].RunId, Is.EqualTo("run-4"));
+            Assert.That(rows[2].RunId, Is.EqualTo("run-3"));
+            Assert.That(rows[3].RunId, Is.EqualTo("run-2"));
+            Assert.That(rows[4].RunId, Is.EqualTo("run-1"));
+        });
+    }
+
+    [TestCase(-1, 0)]
+    [TestCase(0, 0)]
+    [TestCase(5, 5)]
+    [TestCase(150, 100)]
+    public async Task GetRecentAcrossAgentsAsync_Clamps_0_100_NonThrowingly(int requestedTake, int expectedCount)
+    {
+        // Seed 150 rows across 2 agents with distinct CreatedUtc to exercise
+        // the clamp ceiling + verify cross-agent shape (no per-agent filter).
+        var agentA = Guid.NewGuid();
+        var agentB = Guid.NewGuid();
+        for (var i = 0; i < 150; i++)
+        {
+            var agentId = i % 2 == 0 ? agentA : agentB;
+            await _repository.AddAsync(
+                Entry($"run-{i}", agentId, createdUtc: FixedUtcNow.AddSeconds(i)),
+                CancellationToken.None);
+        }
+
+        var result = await _repository.GetRecentAcrossAgentsAsync(requestedTake, CancellationToken.None);
+
+        Assert.That(result, Has.Count.EqualTo(expectedCount));
+    }
+
+    [Test]
+    public async Task GetRecentAcrossAgentsAsync_EmptyTable_ReturnsEmptyList()
+    {
+        var rows = await _repository.GetRecentAcrossAgentsAsync(10, CancellationToken.None);
+
+        Assert.That(rows, Is.Empty, "Empty table returns empty list, not exception");
+    }
+
     [TestCase(IndexingStatus.Pending, 0)]
     [TestCase(IndexingStatus.Embedded, 1)]
     [TestCase(IndexingStatus.Failed, 2)]

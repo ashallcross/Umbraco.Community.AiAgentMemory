@@ -95,4 +95,27 @@ internal sealed class EFCoreMemoryEntryRepository : IMemoryEntryRepository
         ((ICoreScope)scope).Complete();
         return rows;
     }
+
+    public async Task<IReadOnlyList<MemoryEntryEntity>> GetRecentAcrossAgentsAsync(
+        int take,
+        CancellationToken cancellationToken)
+    {
+        // Story 4.9 — Learning Wall consumer. Mirrors GetRecentByAgentIdAsync
+        // verbatim minus the per-agent Where filter.
+        if (take <= 0)
+        {
+            return Array.Empty<MemoryEntryEntity>();
+        }
+        var effectiveTake = take > 100 ? 100 : take;
+
+        using var scope = _scopeProvider.CreateScope(RepositoryCacheMode.Default, null);
+        var rows = await scope.ExecuteWithContextAsync<List<MemoryEntryEntity>>(
+            async db => await db.MemoryEntries
+                .OrderByDescending(e => e.CreatedUtc)
+                .ThenByDescending(e => e.Id)
+                .Take(effectiveTake)
+                .ToListAsync(cancellationToken));
+        ((ICoreScope)scope).Complete();
+        return rows;
+    }
 }

@@ -94,6 +94,7 @@ public sealed class AgentMemoryBackofficeApiComposer : IComposer
             typeof(AgentFeedbackController),
             typeof(AgentRunReadController),
             typeof(AgentFeedbackReadController),
+            typeof(MemoryEntriesReadController),
         };
 
         public AgentMemoryOperationIdHandler(IOptions<ApiVersioningOptions> apiVersioningOptions)
