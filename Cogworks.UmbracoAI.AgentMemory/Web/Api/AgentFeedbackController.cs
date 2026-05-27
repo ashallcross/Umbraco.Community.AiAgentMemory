@@ -166,13 +166,44 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
                 detail: $"No agent runs found for the supplied runId ('{request.RunId}'). The run may not yet be audit-logged, or the upstream Metadata propagation (PR-Upstream-N / Fork (i)) is not deployed on this host.",
                 statusCode: StatusCodes.Status404NotFound);
         }
-        // v0.1 single-agent attribution assumption — Brand Voice Audit demo's
-        // workflow is single-agent (one Run AI Agent step). Multi-agent workflows
-        // surface a v0.2 disambiguation requirement (Story 5.x candidate).
-        var agentId = runs[0].AgentId;
+
+        // Story 4.12 picker — when SelectedRunId is supplied, resolve agentId
+        // from the named sibling iteration and record feedback under the
+        // per-iteration RunId so a batch review session can teach N iterations
+        // independently. AgentFeedbackService supersedes by (RunId, CreatedBy)
+        // so distinct selectedRunId values yield distinct supersede keys.
+        // Legacy/non-picker submissions (SelectedRunId == null) preserve
+        // Story 2.3 + Story 4.5 ThreadId-keyed behaviour byte-compatibly.
+        string feedbackRunId;
+        Guid agentId;
+        if (!string.IsNullOrWhiteSpace(request.SelectedRunId))
+        {
+            var selectedRun = runs.SingleOrDefault(r =>
+                string.Equals(r.RunId, request.SelectedRunId, StringComparison.Ordinal));
+            if (selectedRun is null)
+            {
+                _logger.LogWarning(
+                    "AgentFeedbackController.PostAsync — SelectedRunId={SelectedRunId} not found within ThreadId={ThreadId} group ({Count} siblings). Returning 404.",
+                    request.SelectedRunId, request.RunId, runs.Count);
+                return Problem(
+                    title: "Selected iteration not found.",
+                    detail: $"No iteration with runId '{request.SelectedRunId}' was found within this workflow run. The iteration may have been pruned, or it belongs to a different workflow.",
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+            feedbackRunId = selectedRun.RunId;
+            agentId = selectedRun.AgentId;
+        }
+        else
+        {
+            // v0.1 single-agent attribution assumption — Brand Voice Audit demo's
+            // workflow is single-agent (one Run AI Agent step). Multi-agent workflows
+            // surface a v0.2 disambiguation requirement (Story 5.x candidate).
+            feedbackRunId = request.RunId;
+            agentId = runs[0].AgentId;
+        }
 
         await _feedbackService.RecordFeedbackAsync(
-            request.RunId,
+            feedbackRunId,
             agentId,
             request.Score,
             request.Comment,
@@ -182,7 +213,7 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
         // Story 3.1 — fire-and-forget enqueue. Synchronous; only schedules
         // the indexing work on IBackgroundTaskQueue and returns. NFR-P2 is
         // not affected — the foreground 200 OK ships immediately.
-        _indexer.EnqueueIndex(request.RunId, agentId);
+        _indexer.EnqueueIndex(feedbackRunId, agentId);
 
         return Ok();
     }
@@ -208,6 +239,12 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
         if (request.Comment is { Length: > CommentMaxChars })
         {
             return (true, $"comment cannot exceed {CommentMaxChars} characters (received {request.Comment.Length}).");
+        }
+        // Story 4.12 — selectedRunId is optional; cap symmetric with RunId so
+        // an oversized field can't drive resource exhaustion.
+        if (request.SelectedRunId is { Length: > RunIdMaxChars })
+        {
+            return (true, $"selectedRunId cannot exceed {RunIdMaxChars} characters (received {request.SelectedRunId.Length}).");
         }
         return (false, null);
     }

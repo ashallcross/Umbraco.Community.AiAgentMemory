@@ -43,6 +43,18 @@ namespace Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
 /// (graceful degradation per NFR-R1; Warning log emitted on malformed-bullet
 /// case so Story 3.3 contract drift is surfaced in ops dashboards).
 /// </para>
+/// <para>
+/// <b>Per-iteration selection field (Story 4.12 — picker selectedRunId):</b>
+/// <see cref="SelectedRunId"/> carries the per-iteration agent-invocation key
+/// (<c>Metadata.Umbraco.AI.Agent.RunId</c>) for the iteration whose detail is
+/// being projected. <see langword="null"/> for legacy/non-picker requests
+/// (when the controller falls through to <c>runs[0]</c> from the ThreadId
+/// group, preserving Story 4.5 byte-compatible behaviour). The
+/// <see cref="RunId"/> field continues to carry the supplied ThreadId for
+/// backwards compatibility — see Story 4.12 LD#8 + the
+/// <c>cogworks_agent_memory_feedback.RunId</c> column dual-semantic note in
+/// <c>project-context.md</c>.
+/// </para>
 /// </remarks>
 public sealed record AgentRunDetailResponse(
     string RunId,
@@ -54,7 +66,8 @@ public sealed record AgentRunDetailResponse(
     IReadOnlyList<AgentRunDetailIssue> Issues,
     IReadOnlyList<string> Suggestions,
     bool MemoryUsed,
-    IReadOnlyList<AgentRunCitedMemory> CitedMemories);
+    IReadOnlyList<AgentRunCitedMemory> CitedMemories,
+    string? SelectedRunId = null);
 
 /// <summary>
 /// A single flagged item from the agent's structured output, surfaced to the

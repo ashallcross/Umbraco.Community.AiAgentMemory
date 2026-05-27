@@ -133,13 +133,27 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
     /// issues, suggestions). Used by the editor feedback widget to render
     /// agent-output context above the feedback form.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Optional <paramref name="selectedRunId"/> (Story 4.12 picker):</b>
+    /// when supplied, the controller selects the single sibling within the
+    /// ThreadId group whose <c>Metadata.Umbraco.AI.Agent.RunId</c> equals
+    /// <paramref name="selectedRunId"/> — surfacing a specific For Each
+    /// iteration's prompt/response/memory-injection state. Unknown
+    /// <paramref name="selectedRunId"/> returns 404. When omitted, behaviour
+    /// is byte-compatible with Story 4.5: selects <c>runs[0]</c> from
+    /// <see cref="IAgentRunReader.GetRunsForThreadAsync"/>'s DESC-ordered
+    /// list (most-recent iteration).
+    /// </para>
+    /// </remarks>
     [HttpGet("{runId}")]
     [ProducesResponseType<AgentRunDetailResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetAsync(
         string runId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? selectedRunId = null)
     {
         if (string.IsNullOrWhiteSpace(runId))
         {
@@ -153,6 +167,16 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
             return Problem(
                 title: "Invalid run identifier.",
                 detail: $"runId cannot exceed {RunIdMaxChars} characters (received {runId.Length}).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        // Story 4.12 — selectedRunId is opt-in; validate length symmetric with
+        // runId so an oversized query string can't drive resource exhaustion.
+        if (selectedRunId is not null && selectedRunId.Length > RunIdMaxChars)
+        {
+            return Problem(
+                title: "Invalid selected run identifier.",
+                detail: $"selectedRunId cannot exceed {RunIdMaxChars} characters (received {selectedRunId.Length}).",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
@@ -180,11 +204,41 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
                 statusCode: StatusCodes.Status404NotFound);
         }
 
-        // v0.1 single-agent attribution assumption — Brand Voice Audit demo's
-        // workflow is single-agent (one Run AI Agent step). Mirrors
-        // AgentFeedbackController.PostAsync. Multi-agent disambiguation is a
-        // v0.2 candidate.
-        var run = runs[0];
+        AgentRunRecord run;
+        string? resolvedSelectedRunId;
+        if (!string.IsNullOrWhiteSpace(selectedRunId))
+        {
+            // Story 4.12 picker — pick the named iteration from the ThreadId
+            // group. SingleOrDefault keeps the v0.1 single-row-per-RunId
+            // contract honest (DRIFT-NEW-3 / Story 1.2 § Remarks). Unknown
+            // selectedRunId surfaces as 404 so the widget reverts to its
+            // previous selection.
+            var match = runs.SingleOrDefault(r =>
+                string.Equals(r.RunId, selectedRunId, StringComparison.Ordinal));
+            if (match is null)
+            {
+                _logger.LogDebug(
+                    "AgentRunReadController.GetAsync — selectedRunId={SelectedRunId} not found within ThreadId={ThreadId} group ({Count} siblings).",
+                    selectedRunId, runId, runs.Count);
+                return Problem(
+                    title: "Selected iteration not found.",
+                    detail: $"No iteration with runId '{selectedRunId}' was found within this workflow run. The iteration may have been pruned, or it belongs to a different workflow.",
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+            run = match;
+            resolvedSelectedRunId = match.RunId;
+        }
+        else
+        {
+            // Pre-Story-4.12 byte-compatible behaviour — most-recent iteration
+            // (DESC ordering from GetRunsForThreadAsync). v0.1 single-agent
+            // attribution assumption — Brand Voice Audit demo's workflow is
+            // single-agent (one Run AI Agent step). Mirrors
+            // AgentFeedbackController.PostAsync. Multi-agent disambiguation is
+            // a v0.2 candidate.
+            run = runs[0];
+            resolvedSelectedRunId = null;
+        }
 
         var (score, issues, suggestions) = TryParseStructuredOutput(run.ResponseSnapshotJoined);
         var (memoryUsed, citedMemories) = ParseMemoryInjection(run.PromptSnapshotJoined);
@@ -207,9 +261,88 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
             Issues: issues,
             Suggestions: suggestions,
             MemoryUsed: memoryUsed,
-            CitedMemories: citedMemories);
+            CitedMemories: citedMemories,
+            SelectedRunId: resolvedSelectedRunId);
 
         return Ok(response);
+    }
+
+    /// <summary>
+    /// Story 4.12 — returns all sibling agent-run iterations sharing the
+    /// supplied <paramref name="threadId"/> (workflow-run grouping key from
+    /// <c>Metadata.Umbraco.AI.Agent.ThreadId</c>). Used by the Run Detail
+    /// modal's per-iteration picker so editors can flip between For Each
+    /// iterations without leaving the modal.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Sort order:</b> ASC by <see cref="AgentRunRecord.StartedUtc"/> —
+    /// natural sequential-walk-through order for an editor reviewing an
+    /// N-item batch. Note that
+    /// <see cref="IAgentRunReader.GetRunsForThreadAsync"/> returns DESC; this
+    /// endpoint re-sorts ASC explicitly per Story 4.12 LD#3a.
+    /// </para>
+    /// <para>
+    /// <b>Graceful degradation (NFR-R3):</b> empty list for unknown
+    /// ThreadIds; reader throws are caught at Warning + surface as empty
+    /// list. <see cref="OperationCanceledException"/> propagates per
+    /// ASP.NET Core convention.
+    /// </para>
+    /// </remarks>
+    [HttpGet("{threadId}/siblings")]
+    [ProducesResponseType<IReadOnlyList<AgentRunSiblingResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetSiblingsAsync(
+        string threadId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            return Problem(
+                title: "Invalid thread identifier.",
+                detail: "threadId is required and cannot be empty.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+        if (threadId.Length > RunIdMaxChars)
+        {
+            return Problem(
+                title: "Invalid thread identifier.",
+                detail: $"threadId cannot exceed {RunIdMaxChars} characters (received {threadId.Length}).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        IReadOnlyList<AgentRunRecord> runs;
+        try
+        {
+            runs = await _runReader
+                .GetRunsForThreadAsync(threadId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "AgentRunReadController.GetSiblingsAsync — IAgentRunReader.GetRunsForThreadAsync threw for ThreadId={ThreadId}; returning empty list. NFR-R3 graceful degradation.",
+                threadId);
+            return Ok(Array.Empty<AgentRunSiblingResponse>());
+        }
+
+        // ASC sort + project. Empty list is the legitimate response for
+        // unknown ThreadIds (not 404 — the picker is the natural place to
+        // surface "no iterations" copy; the modal stays usable).
+        var siblings = runs
+            .OrderBy(r => r.StartedUtc)
+            .Select(r => new AgentRunSiblingResponse(
+                ThreadId: threadId,
+                RunId: r.RunId,
+                StartedUtc: r.StartedUtc,
+                IsCurrent: false))
+            .ToList();
+
+        return Ok((IReadOnlyList<AgentRunSiblingResponse>)siblings);
     }
 
     /// <summary>

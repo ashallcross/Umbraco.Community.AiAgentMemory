@@ -159,12 +159,17 @@ internal sealed class FeedbackIndexer : IFeedbackIndexer
             return;
         }
 
-        // Read run records for the ThreadId. v0.1 picks runs[0] (most-recent
-        // per StartedUtc DESC); multi-record join is a v0.2 candidate.
-        IReadOnlyList<AgentRunRecord> runs;
+        // Story 4.12 picker — selectedRunId-first resolution. AgentFeedbackController
+        // passes the per-iteration RunId (Metadata.Umbraco.AI.Agent.RunId) when the
+        // editor submits feedback via the batch picker; we want the indexer to
+        // embed THAT iteration's prompt/response/memory-injection state, not the
+        // most-recent sibling's. Probe GetRunAsync(runId) first; if it returns null
+        // (legacy ThreadId-keyed rows from pre-Story-4.12 submissions), fall back
+        // to GetRunsForThreadAsync(runId) + runs[0] for byte-compatible behaviour.
+        AgentRunRecord? selectedRun;
         try
         {
-            runs = await runReader.GetRunsForThreadAsync(runId, cancellationToken).ConfigureAwait(false);
+            selectedRun = await runReader.GetRunAsync(runId, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -173,18 +178,46 @@ internal sealed class FeedbackIndexer : IFeedbackIndexer
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "FeedbackIndexer — run-reader threw for run {RunId} (agent {AgentId}); skipping.",
+                "FeedbackIndexer — run-reader GetRunAsync threw for run {RunId} (agent {AgentId}); skipping.",
                 runId, agentId);
             return;
         }
-        if (runs.Count == 0)
+
+        AgentRunRecord run;
+        if (selectedRun is not null)
         {
-            _logger.LogDebug(
-                "FeedbackIndexer — no audit-log records for RunId {RunId} (agent {AgentId}); skipping.",
-                runId, agentId);
-            return;
+            run = selectedRun;
         }
-        var run = runs[0];
+        else
+        {
+            // Fallback: legacy ThreadId-keyed rows OR pre-Fork-(i) audit rows
+            // without populated Metadata. v0.1 picks runs[0] (most-recent per
+            // StartedUtc DESC); multi-record join is a v0.2 candidate.
+            IReadOnlyList<AgentRunRecord> runs;
+            try
+            {
+                runs = await runReader.GetRunsForThreadAsync(runId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "FeedbackIndexer — run-reader GetRunsForThreadAsync threw for run {RunId} (agent {AgentId}); skipping.",
+                    runId, agentId);
+                return;
+            }
+            if (runs.Count == 0)
+            {
+                _logger.LogDebug(
+                    "FeedbackIndexer — no audit-log records for RunId {RunId} (agent {AgentId}); skipping.",
+                    runId, agentId);
+                return;
+            }
+            run = runs[0];
+        }
 
         // Read feedback; if empty → Debug + return (defensive guard against NFR-R3 swallow).
         IReadOnlyList<AgentRunFeedback> feedback;

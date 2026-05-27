@@ -23,6 +23,23 @@ type ScoreString = "ThumbsUp" | "ThumbsDown";
 type WidgetState = "idle" | "submitting" | "success" | "error";
 type RunDetailState = "loading" | "loaded" | "unavailable";
 type ExistingFeedbackState = "loading" | "loaded" | "unavailable";
+type SiblingsState = "loading" | "loaded" | "unavailable";
+
+/**
+ * Story 4.12 — one sibling iteration in a For Each batch workflow. Returned
+ * by GET /umbraco/management/api/v1/cogworks-agent-memory/runs/{threadId}/siblings.
+ *
+ * `threadId` is the workflow-run grouping key (modalContext.data.runId);
+ * `runId` is the per-iteration agent-invocation key surfaced by the picker
+ * arrows. Sort order from the server is ASC by `startedUtc` (oldest first)
+ * so the widget can walk forward through the batch.
+ */
+type AgentRunSibling = {
+  threadId: string;
+  runId: string;
+  startedUtc: string;
+  isCurrent: boolean;
+};
 
 /**
  * Wire-format of `FeedbackScore` per Umbraco Management-API's default
@@ -119,9 +136,18 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   @state() private _existingFeedback: AgentRunFeedbackEntry[] | null = null;
   @state() private _currentUserId: string | null = null;
 
+  // Story 4.12 — picker state. `_siblings` is empty until the siblings fetch
+  // settles; `_selectedRunId` is null until we know we have > 1 sibling, at
+  // which point we initialise it to the FIRST iteration in the ASC list
+  // (oldest — natural sequential-walk-through entry point per LD#3a).
+  @state() private _siblings: AgentRunSibling[] = [];
+  @state() private _siblingsState: SiblingsState = "loading";
+  @state() private _selectedRunId: string | null = null;
+
   private _abortController: AbortController | null = null;
   private _runDetailAbortController: AbortController | null = null;
   private _existingFeedbackAbortController: AbortController | null = null;
+  private _siblingsAbortController: AbortController | null = null;
 
   // One-shot guard so post-load `_existingFeedback` settles don't overwrite
   // mid-edit form state on subsequent renders. Story 4.5 AC10.b.
@@ -151,7 +177,13 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     // editor sees score / issues / suggestions before thumbing. Fire-and-forget
     // promise; render reacts via @state. Graceful degradation on any failure
     // (404, network error, parse failure) — the feedback form still works.
-    void this._loadRunDetail();
+    //
+    // Story 4.12 — these initial fetches use the legacy ThreadId-keyed URLs
+    // (selectedRunIdAtLaunch = null). When the siblings fetch resolves with
+    // > 1 entries, it will switch to selectedRunId-keyed refetches and stale
+    // legacy responses will be ignored via the per-fetch selectedRunId
+    // snapshot guard in `_loadRunDetail` / `_loadExistingFeedback`.
+    void this._loadRunDetail(null);
 
     // Story 4.5 Task 0h — resolve the current authenticated user GUID via
     // UMB_CURRENT_USER_CONTEXT so the widget can decide which feedback row
@@ -165,13 +197,22 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     // Story 4.5 Q1 — parallel fetch for the editor's previous feedback rows
     // on this run, so the modal re-open shows the editor's last submission
     // + an Edit affordance for supersede. Story 4.5 AC8.
-    void this._loadExistingFeedback();
+    void this._loadExistingFeedback(null);
+
+    // Story 4.12 — kick off the siblings probe so the modal knows whether it
+    // is rendering a single-iteration flow (no picker) or a batch flow (>1
+    // siblings → picker renders + selectedRunId-keyed refetches replace the
+    // initial legacy fetches above). The siblings load is non-blocking; if
+    // it fails or returns < 2 entries, the legacy fetches' responses surface
+    // normally and the widget is byte-compatible with Story 4.5.
+    void this._loadSiblings();
   }
 
   override disconnectedCallback() {
     this._abortController?.abort();
     this._runDetailAbortController?.abort();
     this._existingFeedbackAbortController?.abort();
+    this._siblingsAbortController?.abort();
     super.disconnectedCallback();
   }
 
@@ -196,13 +237,13 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     }
   }
 
-  private async _loadRunDetail() {
-    const runId = this.data?.runId ?? "";
-    if (runId.length === 0) {
+  private async _loadRunDetail(selectedRunIdAtLaunch: string | null): Promise<boolean> {
+    const threadId = this.data?.runId ?? "";
+    if (threadId.length === 0) {
       // Bellissima/Strategy-B contract violation already surfaced by _submit;
       // don't double-error here. Just mark the agent-output panel unavailable.
       this._runDetailState = "unavailable";
-      return;
+      return false;
     }
 
     this._runDetailAbortController?.abort();
@@ -215,28 +256,49 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     this._runDetailAbortController = controller;
     this._runDetailState = "loading";
 
+    // Story 4.12 — when the picker is active, the URL targets a specific
+    // iteration via ?selectedRunId=. When inactive (initial load OR single-
+    // iteration flow), the URL is the Story 4.5 ThreadId-only shape.
+    const url = selectedRunIdAtLaunch !== null
+      ? `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(threadId)}?selectedRunId=${encodeURIComponent(selectedRunIdAtLaunch)}`
+      : `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(threadId)}`;
+
     try {
       const response = await authenticatedFetch(
         () => this.getContext(UMB_AUTH_CONTEXT),
-        `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(runId)}`,
+        url,
         { signal: controller.signal },
       );
       // If the controller has been aborted (component disconnected, or a
       // concurrent _loadRunDetail invocation has superseded us), bail out
       // silently rather than mutating @state on a stale or disconnected element.
+      // Stale early-returns surface as `true` to the caller so picker-change
+      // rollback (Story 4.12 AC4.e) doesn't fire on staleness alone.
       if (controller.signal.aborted) {
-        return;
+        return true;
+      }
+      // Story 4.12 — second staleness check: if the picker has moved on since
+      // we launched (e.g. legacy fetch resolves AFTER the siblings fetch has
+      // already initialised _selectedRunId), don't clobber the currently-
+      // selected iteration's state. Abort would normally cover this, but the
+      // race window between abort and state mutation is wide enough to warrant
+      // explicit defence (mirrors Story 4.9 review-patch pattern).
+      if (this._selectedRunId !== selectedRunIdAtLaunch) {
+        return true;
       }
       if (!response.ok) {
         // 404 / 500 / any non-2xx → graceful degradation. The feedback form
         // remains usable; the agent-output panel surfaces the unavailable
         // notice.
         this._runDetailState = "unavailable";
-        return;
+        return false;
       }
       const body = (await response.json()) as AgentRunDetail;
       if (controller.signal.aborted) {
-        return;
+        return true;
+      }
+      if (this._selectedRunId !== selectedRunIdAtLaunch) {
+        return true;
       }
       // Defensive shape guard — if the server returns a 200 with a structure
       // that doesn't match AgentRunDetail (e.g., a ProblemDetails body shipped
@@ -244,7 +306,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       // treat as unavailable rather than crashing the render path later.
       if (!Array.isArray(body.issues) || !Array.isArray(body.suggestions)) {
         this._runDetailState = "unavailable";
-        return;
+        return false;
       }
       // Backend parse-failure / empty-structured-output shape. AC7 treats this
       // the same as 404 from the widget perspective: the editor sees the
@@ -261,14 +323,15 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
         !body.memoryUsed
       ) {
         this._runDetailState = "unavailable";
-        return;
+        return false;
       }
       this._runDetail = body;
       this._runDetailState = "loaded";
+      return true;
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         // Editor navigated away mid-fetch; don't surface anything.
-        return;
+        return true;
       }
       // `response.json()` mid-stream abort throws a `TypeError` (not an
       // `AbortError`) per the fetch spec — so the AbortError catch above
@@ -276,20 +339,21 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       // if we're aborted, the editor navigated away after the fetch resolved
       // but before the body finished streaming — silently bail.
       if (controller.signal.aborted) {
-        return;
+        return true;
       }
       // AuthContextUnavailableError, network error, JSON parse failure — all
       // converge on the same UX: the agent-output panel marks unavailable;
       // the feedback form is still rendered.
       this._runDetailState = "unavailable";
+      return false;
     }
   }
 
-  private async _loadExistingFeedback() {
-    const runId = this.data?.runId ?? "";
-    if (runId.length === 0) {
+  private async _loadExistingFeedback(selectedRunIdAtLaunch: string | null): Promise<boolean> {
+    const threadId = this.data?.runId ?? "";
+    if (threadId.length === 0) {
       this._existingFeedbackState = "unavailable";
-      return;
+      return false;
     }
 
     this._existingFeedbackAbortController?.abort();
@@ -300,31 +364,45 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     this._existingFeedbackAbortController = controller;
     this._existingFeedbackState = "loading";
 
+    // Story 4.12 — when the picker is active, the GET /feedback/{id} call
+    // targets the per-iteration RunId (so the form seeds from THAT iteration's
+    // prior feedback). When inactive, the URL is the Story 4.5 ThreadId
+    // shape — preserves the seed contract byte-compatibly.
+    const feedbackId = selectedRunIdAtLaunch ?? threadId;
+
     try {
       const response = await authenticatedFetch(
         () => this.getContext(UMB_AUTH_CONTEXT),
-        `/umbraco/management/api/v1/cogworks-agent-memory/feedback/${encodeURIComponent(runId)}`,
+        `/umbraco/management/api/v1/cogworks-agent-memory/feedback/${encodeURIComponent(feedbackId)}`,
         { signal: controller.signal },
       );
+      // Stale early-returns surface as `true` so picker rollback (AC4.e)
+      // doesn't fire on staleness alone.
       if (controller.signal.aborted) {
-        return;
+        return true;
+      }
+      if (this._selectedRunId !== selectedRunIdAtLaunch) {
+        return true;
       }
       if (!response.ok) {
         this._existingFeedbackState = "unavailable";
-        return;
+        return false;
       }
       const body = (await response.json()) as {
         runId: string;
         existing: AgentRunFeedbackEntry[];
       };
       if (controller.signal.aborted) {
-        return;
+        return true;
+      }
+      if (this._selectedRunId !== selectedRunIdAtLaunch) {
+        return true;
       }
       // Defensive shape guard — ProblemDetails accidentally shipped on 200,
       // adopter proxy rewriting, etc. → unavailable.
       if (!Array.isArray(body.existing)) {
         this._existingFeedbackState = "unavailable";
-        return;
+        return false;
       }
       this._existingFeedback = body.existing;
       this._existingFeedbackState = "loaded";
@@ -344,7 +422,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
         if (this._currentUserIdReady !== null) {
           await this._currentUserIdReady;
           if (controller.signal.aborted) {
-            return;
+            return true;
           }
         }
         const userHasTouchedForm = this._score !== null || this._comment !== "";
@@ -359,6 +437,95 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
         }
         this._hasSeededFromExisting = true;
       }
+      return true;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return true;
+      }
+      if (controller.signal.aborted) {
+        return true;
+      }
+      // AuthContextUnavailableError, network errors, JSON parse failures,
+      // shape mismatches — all converge on unavailable; form remains usable.
+      this._existingFeedbackState = "unavailable";
+      return false;
+    }
+  }
+
+  /**
+   * Story 4.12 — fetches the per-iteration sibling list for the ThreadId.
+   * When the workflow ran For Each over N items, this surfaces all N agent
+   * invocations so the editor can flip between them via the picker without
+   * leaving the modal.
+   *
+   * Behaviour:
+   *  - `< 2` siblings → picker stays hidden; legacy detail/feedback fetches
+   *    already in flight settle normally. `_selectedRunId` stays `null`.
+   *  - `≥ 2` siblings → initialise `_selectedRunId` to the FIRST iteration
+   *    in the ASC list (oldest first per LD#3a), then kick off refetches of
+   *    detail + feedback targeting that specific iteration. The legacy fetches
+   *    started in `connectedCallback` are aborted via the per-fetch reassign
+   *    so their responses don't clobber selected-sibling state.
+   *  - Any failure (404 / parse / network) → unavailable; widget falls
+   *    through to legacy single-iteration behaviour.
+   */
+  private async _loadSiblings() {
+    const threadId = this.data?.runId ?? "";
+    if (threadId.length === 0) {
+      this._siblingsState = "unavailable";
+      return;
+    }
+
+    this._siblingsAbortController?.abort();
+    const controller = new AbortController();
+    this._siblingsAbortController = controller;
+
+    try {
+      const response = await authenticatedFetch(
+        () => this.getContext(UMB_AUTH_CONTEXT),
+        `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(threadId)}/siblings`,
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) {
+        return;
+      }
+      if (!response.ok) {
+        this._siblingsState = "unavailable";
+        return;
+      }
+      const body = (await response.json()) as unknown;
+      if (controller.signal.aborted) {
+        return;
+      }
+      // Defensive shape guard — controller emits IReadOnlyList<AgentRunSiblingResponse>
+      // (a JSON array). Any other shape (ProblemDetails on 200, proxy rewrite,
+      // …) marks unavailable and falls through to the legacy single-iteration path.
+      if (!Array.isArray(body)) {
+        this._siblingsState = "unavailable";
+        return;
+      }
+      const siblings = body as AgentRunSibling[];
+      this._siblings = siblings;
+      this._siblingsState = "loaded";
+
+      // Picker only activates when we have > 1 iteration. Single-iteration
+      // (or empty) responses preserve Story 4.5 single-article UX byte-
+      // identically (AC3.g).
+      if (siblings.length > 1) {
+        // Default-select FIRST iteration (oldest in ASC-sorted list) per
+        // LD#3a — natural sequential-walk-through entry point. Switching
+        // `_selectedRunId` invalidates the legacy in-flight responses via
+        // the per-fetch snapshot guard.
+        const firstRunId = siblings[0].runId;
+        this._selectedRunId = firstRunId;
+        // Reset the seed flag so the new feedback fetch (for this iteration)
+        // seeds the form correctly.
+        this._hasSeededFromExisting = false;
+        // Kick off refetches targeting the selected iteration. These abort
+        // the legacy controllers internally before issuing their own GETs.
+        void this._loadRunDetail(firstRunId);
+        void this._loadExistingFeedback(firstRunId);
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
@@ -366,9 +533,65 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       if (controller.signal.aborted) {
         return;
       }
-      // AuthContextUnavailableError, network errors, JSON parse failures,
-      // shape mismatches — all converge on unavailable; form remains usable.
-      this._existingFeedbackState = "unavailable";
+      this._siblingsState = "unavailable";
+    }
+  }
+
+  /**
+   * Story 4.12 — picker arrow click handler. Changes `_selectedRunId` to the
+   * sibling at the new index, resets the existing-feedback seed flag so the
+   * form seeds from THAT iteration's prior feedback, and kicks off detail +
+   * feedback refetches.
+   *
+   * Submit-in-flight guard: the picker arrows are disabled in the template
+   * while `_state === "submitting"` so an in-flight feedback POST can't end
+   * up attributed to the wrong iteration. This handler is a defence-in-depth
+   * no-op in that state.
+   *
+   * Failure rollback (AC4.e): when either fetch comes back unavailable, the
+   * picker rolls back to the previous iteration so the editor doesn't see a
+   * mid-state half-populated modal. The previous iteration's content is
+   * deliberately NOT cleared synchronously here — letting it remain visible
+   * during the loading transition (and stay if the new fetch fails) avoids
+   * the "flash to empty" footgun the spec calls out.
+   */
+  private async _onPickerChange(newIndex: number) {
+    if (this._state === "submitting") return;
+    if (newIndex < 0 || newIndex >= this._siblings.length) return;
+    const target = this._siblings[newIndex];
+    if (target.runId === this._selectedRunId) return;
+
+    // Snapshot fields needed for AC4.e rollback. Tuple over object literal to
+    // keep the compiled-bundle footprint tight.
+    const prev: [
+      string | null, AgentRunDetail | null, RunDetailState,
+      AgentRunFeedbackEntry[] | null, ExistingFeedbackState,
+      ScoreString | null, string, boolean,
+    ] = [
+      this._selectedRunId, this._runDetail, this._runDetailState,
+      this._existingFeedback, this._existingFeedbackState,
+      this._score, this._comment, this._hasSeededFromExisting,
+    ];
+
+    this._selectedRunId = target.runId;
+    this._hasSeededFromExisting = false;
+    this._score = null;
+    this._comment = "";
+
+    const [detailOk, feedbackOk] = await Promise.all([
+      this._loadRunDetail(target.runId),
+      this._loadExistingFeedback(target.runId),
+    ]);
+
+    // Newer click owns the state — don't rollback to a now-stale snapshot.
+    if (this._selectedRunId !== target.runId) return;
+
+    if (!detailOk || !feedbackOk) {
+      [
+        this._selectedRunId, this._runDetail, this._runDetailState,
+        this._existingFeedback, this._existingFeedbackState,
+        this._score, this._comment, this._hasSeededFromExisting,
+      ] = prev;
     }
   }
 
@@ -623,6 +846,83 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   }
 
   /**
+   * Story 4.12 — picker row above the agent-output content. Renders only when
+   * `_siblings.length > 1` (LD#6: single-iteration flows preserve Story 4.5
+   * UX byte-identically). Shape: `[←] Iteration N of M · {hh:mm:ss} [→]` —
+   * agent-agnostic per LD#4; no content-type vocabulary in v0.1.
+   *
+   * Arrows are disabled at boundaries (first iteration: ← disabled; last
+   * iteration: → disabled) AND during in-flight feedback submission
+   * (`_state === "submitting"` per § Failure edges — submit-in-flight + picker
+   * change race protection).
+   *
+   * XSS defence: all picker labels are static strings or trusted timestamp
+   * strings; no user-controlled content is rendered via this template.
+   */
+  private _renderPicker() {
+    // Picker only renders once the siblings fetch has settled successfully
+    // AND there is more than one iteration. Hides during the initial load
+    // phase + on unavailable so we don't flash a stub picker during the
+    // network round-trip.
+    if (this._siblingsState !== "loaded" || this._siblings.length <= 1) {
+      return nothing;
+    }
+    const selectedIndex = this._siblings.findIndex(
+      (s) => s.runId === this._selectedRunId,
+    );
+    // Defensive — if the selected RunId isn't in the list (race between
+    // siblings reload and selectedRunId rewrite), default to index 0 so the
+    // picker still renders a sensible position.
+    const idx = selectedIndex >= 0 ? selectedIndex : 0;
+    const total = this._siblings.length;
+    const sibling = this._siblings[idx];
+    const isSubmitting = this._state === "submitting";
+    const prevDisabled = idx === 0 || isSubmitting;
+    const nextDisabled = idx === total - 1 || isSubmitting;
+
+    // Format the iteration's StartedUtc in the user's local timezone. Falls
+    // back to the raw ISO string if Intl parsing throws (malformed timestamp
+    // from a misconfigured server).
+    let timestamp = sibling.startedUtc;
+    try {
+      const date = new Date(sibling.startedUtc);
+      if (!Number.isNaN(date.getTime())) {
+        timestamp = date.toLocaleTimeString();
+      }
+    } catch {
+      // Keep ISO fallback.
+    }
+
+    return html`
+      <div class="picker-row" role="group" aria-label="Iteration picker">
+        <uui-button
+          compact
+          look="secondary"
+          label="Previous iteration"
+          class="picker-prev"
+          ?disabled=${prevDisabled}
+          @click=${() => this._onPickerChange(idx - 1)}
+        >
+          ←
+        </uui-button>
+        <span class="picker-counter" aria-live="polite">
+          Iteration ${idx + 1} of ${total} · ${timestamp}
+        </span>
+        <uui-button
+          compact
+          look="secondary"
+          label="Next iteration"
+          class="picker-next"
+          ?disabled=${nextDisabled}
+          @click=${() => this._onPickerChange(idx + 1)}
+        >
+          →
+        </uui-button>
+      </div>
+    `;
+  }
+
+  /**
    * Story 4.2 — DRIFT-4.1-12 closure. Renders the agent's score / flagged
    * issues / suggestions ABOVE the existing feedback form so the editor sees
    * what they're rating. Three states:
@@ -636,11 +936,16 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
    * fields render via Lit's automatic template-literal HTML-encoding. The
    * Lit's raw-HTML directive is NEVER imported in this file — static grep gate
    * over the directive token returns zero matches.
+   *
+   * Story 4.12 — the picker row is rendered FIRST inside the agent-output
+   * uui-box (above the score/issues/suggestions content) when siblings > 1.
+   * Hidden otherwise.
    */
   private _renderAgentOutput() {
     if (this._runDetailState === "loading") {
       return html`
         <uui-box headline="Agent output" class="agent-output-box">
+          ${this._renderPicker()}
           <p class="agent-output-loading">
             <uui-loader></uui-loader>
             Loading agent output…
@@ -652,6 +957,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     if (this._runDetailState === "unavailable" || this._runDetail === null) {
       return html`
         <uui-box headline="Agent output" class="agent-output-box">
+          ${this._renderPicker()}
           <p class="agent-output-unavailable">
             Agent output unavailable; you can still submit feedback below.
           </p>
@@ -678,6 +984,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
               Memory used
             </uui-tag>`
           : nothing}
+        ${this._renderPicker()}
         <p class="agent-output-identity">
           ${detail.agentDisplayName ?? `Agent ${detail.agentId?.slice(0, 8) ?? "unknown"}`}
         </p>
@@ -813,6 +1120,15 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
             runId,
             score: this._score,
             comment: this._comment.length > 0 ? this._comment : null,
+            // Story 4.12 — picker submissions include selectedRunId so the
+            // controller records feedback under the per-iteration RunId
+            // (creating distinct supersede keys per iteration). Omitted for
+            // non-picker submissions (single-iteration flows) so the legacy
+            // ThreadId-keyed path is preserved byte-compatibly. The "Submit"
+            // button is also disabled while picker arrows are mid-flight, so
+            // selectedRunId here always reflects the iteration the editor
+            // was looking at when they clicked Submit.
+            selectedRunId: this._selectedRunId,
           },
           signal: this._abortController.signal,
         },
@@ -1087,6 +1403,22 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     .cited-memory-no-comment {
       color: var(--uui-color-text-alt);
       font-style: italic;
+    }
+
+    /* Story 4.12 — picker row at the top of the agent-output uui-box.
+       Single horizontal row, agent-agnostic shape. Token-driven foreground
+       per Story 3.4 precedent (uui-color-text-alt). */
+    .picker-row {
+      display: flex;
+      align-items: center;
+      gap: var(--uui-size-space-2);
+      margin: 0 0 var(--uui-size-space-3) 0;
+    }
+
+    .picker-counter {
+      color: var(--uui-color-text-alt);
+      font-size: var(--uui-type-small-size, 0.875rem);
+      font-variant-numeric: tabular-nums;
     }
   `;
 }

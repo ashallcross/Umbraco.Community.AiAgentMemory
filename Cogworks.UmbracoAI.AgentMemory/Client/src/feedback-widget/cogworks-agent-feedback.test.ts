@@ -701,3 +701,502 @@ describe("cogworks-agent-feedback — Story 4.5 Submit-disable-on-no-change", ()
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Story 4.12 — Run Detail modal iteration picker
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Story 4.12 test harness — extends `stubFetchByEndpoint` to route the new
+ * `/runs/{id}/siblings` URL distinctly from the `/runs/{id}` detail URL.
+ * Routing precedence:
+ *   1. `/siblings`           → siblings response (Story 4.12)
+ *   2. `/runs/`              → detail response  (Story 4.5 / 4.12)
+ *   3. `/feedback/`          → feedback response (Story 4.5)
+ *   4. `/feedback` (POST)    → submit-feedback response (Story 2.3)
+ *
+ * Each endpoint accepts a factory so individual responses can vary across
+ * calls (used by the picker-arrow-click + rollback tests). `siblings`
+ * receives the entire array; `runDetail` / `feedback` are picked once per
+ * call shape.
+ */
+function stubFetchByEndpointStory412(opts: {
+  siblings?: unknown;
+  siblingsStatus?: number;
+  runDetail?: unknown | ((url: string) => unknown);
+  runDetailStatus?: number | ((url: string) => number);
+  feedback?: unknown | ((url: string) => unknown);
+  feedbackStatus?: number | ((url: string) => number);
+  feedbackPost?: () => Response;
+}): { calls: FetchCall[]; restore: () => void } {
+  const calls: FetchCall[] = [];
+  const original = globalThis.fetch;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  globalThis.fetch = async (input: any, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : (input as Request).url;
+    calls.push({ url, init });
+    const isPost = (init?.method ?? "GET").toUpperCase() === "POST";
+
+    if (isPost && url.includes("/feedback")) {
+      return opts.feedbackPost?.() ?? makeJsonResponse({}, 200);
+    }
+    if (url.includes("/siblings")) {
+      return makeJsonResponse(opts.siblings ?? [], opts.siblingsStatus ?? 200);
+    }
+    if (url.includes("/runs/")) {
+      const body = typeof opts.runDetail === "function"
+        ? (opts.runDetail as (u: string) => unknown)(url)
+        : opts.runDetail ?? {};
+      const status = typeof opts.runDetailStatus === "function"
+        ? (opts.runDetailStatus as (u: string) => number)(url)
+        : opts.runDetailStatus ?? 200;
+      return makeJsonResponse(body, status);
+    }
+    if (url.includes("/feedback/")) {
+      const body = typeof opts.feedback === "function"
+        ? (opts.feedback as (u: string) => unknown)(url)
+        : opts.feedback ?? makeFeedbackBody();
+      const status = typeof opts.feedbackStatus === "function"
+        ? (opts.feedbackStatus as (u: string) => number)(url)
+        : opts.feedbackStatus ?? 200;
+      return makeJsonResponse(body, status);
+    }
+    return makeJsonResponse({}, 404);
+  };
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = original;
+    },
+  };
+}
+
+function makeSibling(runId: string, startedUtc: string) {
+  return {
+    threadId: "thread-batch-1",
+    runId,
+    startedUtc,
+    isCurrent: false,
+  };
+}
+
+/**
+ * Builds a 3-iteration ASC-sorted siblings list mirroring the demo workflow
+ * (3 article batch). Test bodies override individual iterations as needed.
+ */
+function makeThreeIterationsSiblings() {
+  return [
+    makeSibling("rid-step-1", "2026-05-21T17:00:00Z"),
+    makeSibling("rid-step-2", "2026-05-21T17:00:10Z"),
+    makeSibling("rid-step-3", "2026-05-21T17:00:20Z"),
+  ];
+}
+
+async function makeBatchElement(opts: {
+  siblings?: unknown;
+  threadId?: string;
+  runDetailByUrl?: (url: string) => unknown;
+}) {
+  const element = document.createElement(
+    "cogworks-agent-feedback",
+  ) as TestableFeedbackElement;
+  element.data = { runId: opts.threadId ?? "thread-batch-1" };
+  element.getContext = (async () => makeAuthContext()) as unknown as typeof element.getContext;
+  document.body.append(element);
+  // Wait for siblings to settle first (Story 4.12 - the picker won't render
+  // until the siblings fetch lands and the selectedRunId-keyed refetches
+  // start).
+  const internals = element as unknown as {
+    _siblingsState: string;
+    _existingFeedbackState: string;
+    _runDetailState: string;
+  };
+  await waitUntil(
+    () =>
+      internals._siblingsState === "loaded"
+      || internals._siblingsState === "unavailable",
+    "siblings request did not settle",
+  );
+  await waitUntil(
+    () =>
+      internals._runDetailState === "loaded"
+      || internals._runDetailState === "unavailable",
+    "run detail request did not settle",
+  );
+  await waitUntil(
+    () =>
+      internals._existingFeedbackState === "loaded"
+      || internals._existingFeedbackState === "unavailable",
+    "existing-feedback request did not settle",
+  );
+  await element.updateComplete;
+  return element;
+}
+
+describe("cogworks-agent-feedback — Story 4.12 picker", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("renders the picker (arrows + counter) when siblings.length > 1", async () => {
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const buttons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const prev = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Previous iteration",
+      );
+      const next = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Next iteration",
+      );
+      expect(prev, "previous-iteration arrow").to.not.be.undefined;
+      expect(next, "next-iteration arrow").to.not.be.undefined;
+
+      const text = element.shadowRoot?.textContent ?? "";
+      expect(text, "iteration counter shape").to.contain("Iteration 1 of 3");
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it("hides the picker entirely when siblings.length === 1 (Story 4.5 byte-compat)", async () => {
+    const stub = stubFetchByEndpointStory412({
+      siblings: [makeSibling("rid-solo", "2026-05-21T17:00:00Z")],
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const buttons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const prev = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Previous iteration",
+      );
+      expect(prev, "single-iteration flow hides the picker").to.be.undefined;
+      const text = element.shadowRoot?.textContent ?? "";
+      expect(text).to.not.contain("Iteration 1 of");
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it("initialises selectedRunId to the first ASC iteration without mutating modal data.runId", async () => {
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const internals = element as unknown as { _selectedRunId: string | null };
+      expect(internals._selectedRunId, "default-select oldest iteration").to.equal("rid-step-1");
+      // modalContext.data.runId is the workflow-run grouping key — it must
+      // remain the ThreadId regardless of which iteration is selected.
+      expect(element.data.runId, "modal data.runId is the ThreadId; never mutated").to.equal(
+        "thread-batch-1",
+      );
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it("disables prev/next at boundaries and renders 'Iteration N of M · hh:mm:ss' counter", async () => {
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const buttons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const prev = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Previous iteration",
+      )!;
+      const next = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Next iteration",
+      )!;
+      // At iteration 1 of 3: prev disabled, next enabled.
+      expect(prev.hasAttribute("disabled"), "← disabled at first iteration").to.be.true;
+      expect(next.hasAttribute("disabled"), "→ enabled when not at last").to.be.false;
+      const text = element.shadowRoot?.textContent ?? "";
+      // Counter shape — "Iteration 1 of 3 · hh:mm:ss" (regex tolerates the
+      // local timezone of the test runner; the timestamp is whatever
+      // toLocaleTimeString emits for 2026-05-21T17:00:00Z).
+      expect(text).to.match(/Iteration 1 of 3\s*·\s*\d/);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it("arrow click refetches /runs/{tid}?selectedRunId=... + /feedback/{rid} and updates selectedRunId", async () => {
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: (url) =>
+        url.includes("selectedRunId=rid-step-2")
+          ? makeRunDetailBody({ score: 5, issues: [{ text: "iteration-2-flag" }] })
+          : makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const buttons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const next = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Next iteration",
+      )!;
+      // Click → from iteration 1 to iteration 2.
+      next.dispatchEvent(new Event("click"));
+      // Wait for selectedRunId to flip + detail to settle.
+      const internals = element as unknown as {
+        _selectedRunId: string | null;
+        _runDetailState: string;
+        _hasSeededFromExisting: boolean;
+      };
+      await waitUntil(
+        () => internals._selectedRunId === "rid-step-2"
+          && internals._runDetailState === "loaded",
+        "selectedRunId did not flip to rid-step-2",
+      );
+      await element.updateComplete;
+
+      // URL inspections — both /runs/{tid}?selectedRunId=rid-step-2 +
+      // /feedback/rid-step-2 must have been called.
+      const runDetailUrl = stub.calls.find((c) =>
+        c.url.includes("/runs/") && c.url.includes("selectedRunId=rid-step-2"),
+      );
+      expect(runDetailUrl, "refetched run-detail with selectedRunId").to.not.be.undefined;
+      const feedbackUrl = stub.calls.find((c) =>
+        c.url.includes("/feedback/rid-step-2"),
+      );
+      expect(feedbackUrl, "refetched feedback under per-iteration RunId").to.not.be.undefined;
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it("rolls back picker selection when the new iteration's detail fetch fails (AC4.e)", async () => {
+    let runDetailCallCount = 0;
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: (url) => {
+        runDetailCallCount++;
+        if (url.includes("selectedRunId=rid-step-2")) {
+          return { detail: "synthetic 500" }; // body is irrelevant when status != 200
+        }
+        return makeRunDetailBody({
+          runId: "thread-batch-1",
+          issues: [{ text: "iteration-1-original" }],
+        });
+      },
+      runDetailStatus: (url) =>
+        url.includes("selectedRunId=rid-step-2") ? 500 : 200,
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const internals = element as unknown as {
+        _selectedRunId: string | null;
+        _runDetailState: string;
+        _runDetail: { issues: Array<{ text: string }> } | null;
+      };
+      const callsBefore = runDetailCallCount;
+      const initialSelectedRunId = internals._selectedRunId;
+
+      const buttons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const next = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Next iteration",
+      )!;
+      next.dispatchEvent(new Event("click"));
+
+      // Wait until at least one additional run-detail call has resolved
+      // (the failed iteration-2 fetch).
+      await waitUntil(
+        () => runDetailCallCount > callsBefore,
+        "iteration-2 fetch did not fire",
+      );
+      // Give the microtask queue a tick to flush rollback assignments.
+      await element.updateComplete;
+      await new Promise((r) => setTimeout(r, 10));
+      await element.updateComplete;
+
+      // Picker selection reverted to the initial iteration.
+      expect(
+        internals._selectedRunId,
+        "picker selectedRunId reverted on fetch failure",
+      ).to.equal(initialSelectedRunId);
+      // Previous iteration's data still rendered (no flash-to-empty).
+      expect(internals._runDetail, "previous iteration's detail preserved").to.not.be.null;
+      expect(internals._runDetail!.issues[0].text).to.equal("iteration-1-original");
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it("disables picker arrows while feedback submit is in flight (AC4.f submit-race)", async () => {
+    let resolveSubmit: ((value: Response) => void) | undefined;
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+      // Submit response is pending until the test releases it.
+      feedbackPost: () =>
+        new Response(JSON.stringify({}), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+    // Override fetch one more time so the POST hangs until we explicitly
+    // resolve it (the simpler `feedbackPost` callback above returns sync —
+    // we need an async promise to model in-flight).
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.fetch = (async (input: any, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      const isPost = (init?.method ?? "GET").toUpperCase() === "POST";
+      if (isPost && url.includes("/feedback")) {
+        return new Promise<Response>((resolve) => {
+          resolveSubmit = resolve;
+        });
+      }
+      return originalFetch(input, init);
+    }) as typeof globalThis.fetch;
+
+    try {
+      const element = await makeBatchElement({});
+      const internals = element as unknown as {
+        _score: string | null;
+        _state: string;
+        requestUpdate: () => Promise<void>;
+      };
+      // Toggle a score so Submit is enabled.
+      internals._score = "ThumbsDown";
+      await internals.requestUpdate();
+      await element.updateComplete;
+
+      const buttons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const submit = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Submit feedback",
+      )!;
+      submit.dispatchEvent(new Event("click"));
+      // Wait for state to flip to "submitting".
+      await waitUntil(() => internals._state === "submitting", "state did not enter submitting");
+      await element.updateComplete;
+
+      // Arrows must be disabled while submit is in flight.
+      const buttonsDuringSubmit = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const prevDuring = buttonsDuringSubmit.find(
+        (b) => (b.getAttribute("label") ?? "") === "Previous iteration",
+      )!;
+      const nextDuring = buttonsDuringSubmit.find(
+        (b) => (b.getAttribute("label") ?? "") === "Next iteration",
+      )!;
+      expect(prevDuring.hasAttribute("disabled"), "← disabled during submit").to.be.true;
+      expect(nextDuring.hasAttribute("disabled"), "→ disabled during submit").to.be.true;
+
+      // Release the submit; state moves to "success"; arrows re-enable.
+      resolveSubmit!(new Response(JSON.stringify({}), { status: 200 }));
+      await waitUntil(() => internals._state === "success", "state did not finish submitting");
+      await element.updateComplete;
+    } finally {
+      globalThis.fetch = originalFetch;
+      stub.restore();
+    }
+  });
+
+  it("hides the picker when siblings list is empty (empty-batch ThreadId edge)", async () => {
+    const stub = stubFetchByEndpointStory412({
+      siblings: [],
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const buttons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const prev = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Previous iteration",
+      );
+      expect(prev, "empty siblings → picker hidden").to.be.undefined;
+      const internals = element as unknown as { _selectedRunId: string | null };
+      expect(internals._selectedRunId, "no selectedRunId initialised when batch is empty").to.be.null;
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it("POST body carries selectedRunId for picker submissions", async () => {
+    let lastPostBody: Record<string, unknown> | undefined;
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    // Override fetch to capture the POST body shape.
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.fetch = (async (input: any, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      const isPost = (init?.method ?? "GET").toUpperCase() === "POST";
+      if (isPost && url.includes("/feedback")) {
+        const body = init?.body;
+        if (typeof body === "string") {
+          try {
+            lastPostBody = JSON.parse(body);
+          } catch {
+            lastPostBody = undefined;
+          }
+        }
+        return new Response(JSON.stringify({}), { status: 200 });
+      }
+      return originalFetch(input, init);
+    }) as typeof globalThis.fetch;
+
+    try {
+      const element = await makeBatchElement({});
+      const internals = element as unknown as {
+        _score: string | null;
+        _comment: string;
+        requestUpdate: () => Promise<void>;
+        _state: string;
+      };
+      internals._score = "ThumbsDown";
+      internals._comment = "iteration-1 teaching";
+      await internals.requestUpdate();
+      await element.updateComplete;
+
+      const buttons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const submit = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Submit feedback",
+      )!;
+      submit.dispatchEvent(new Event("click"));
+      await waitUntil(() => internals._state === "success", "submit did not succeed");
+
+      expect(lastPostBody, "POST body captured").to.not.be.undefined;
+      expect(lastPostBody!.runId).to.equal("thread-batch-1");
+      expect(lastPostBody!.selectedRunId).to.equal("rid-step-1");
+      expect(lastPostBody!.comment).to.equal("iteration-1 teaching");
+    } finally {
+      globalThis.fetch = originalFetch;
+      stub.restore();
+    }
+  });
+});

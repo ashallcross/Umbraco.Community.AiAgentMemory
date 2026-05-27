@@ -770,4 +770,237 @@ public class AgentRunReadControllerTests
             Assert.That(response.Suggestions, Is.Empty);
         });
     }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Story 4.12 — sibling endpoint + selectedRunId query (AC5 backend tests)
+    // ═════════════════════════════════════════════════════════════════════
+
+    private const string ThreadId = "thread-batch-1";
+
+    private static AgentRunRecord MakeSibling(
+        Guid agentId,
+        string runId,
+        DateTime startedUtc,
+        string threadId = ThreadId) => new(
+        RunId: runId,
+        AgentId: agentId,
+        AgentVersion: 1,
+        StartedUtc: startedUtc,
+        CompletedUtc: startedUtc.AddSeconds(5),
+        AggregateStatus: AgentRunStatus.Succeeded,
+        Error: null,
+        PromptSnapshotJoined: $"[user] iteration {runId}",
+        ResponseSnapshotJoined: $"[assistant] {{\"score\":7,\"issues\":[{{\"text\":\"flag-{runId}\"}}],\"suggestions\":[\"sugg-{runId}\"]}}",
+        TokenCountInput: 100,
+        TokenCountOutput: 20,
+        ThreadId: threadId,
+        UserId: "user-1",
+        TraceId: $"trace-{runId}");
+
+    [Test]
+    public async Task GetSiblingsAsync_KnownThreadId_SurfacesAllSiblings_AscByStartedUtc()
+    {
+        // Reader returns 6 records DESC (Story 1.2 contract). Endpoint sorts ASC
+        // so the picker walks oldest → newest (Story 4.12 LD#3a).
+        var baseTime = new DateTime(2026, 5, 21, 17, 0, 0, DateTimeKind.Utc);
+        var records = new[]
+        {
+            MakeSibling(_agentId, "rid-6", baseTime.AddSeconds(50)),
+            MakeSibling(_agentId, "rid-5", baseTime.AddSeconds(40)),
+            MakeSibling(_agentId, "rid-4", baseTime.AddSeconds(30)),
+            MakeSibling(_agentId, "rid-3", baseTime.AddSeconds(20)),
+            MakeSibling(_agentId, "rid-2", baseTime.AddSeconds(10)),
+            MakeSibling(_agentId, "rid-1", baseTime),
+        };
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(records));
+
+        var result = await _controller.GetSiblingsAsync(ThreadId, CancellationToken.None);
+
+        var ok = result as OkObjectResult;
+        Assert.That(ok, Is.Not.Null, "Happy path returns Ok(list).");
+        var siblings = ok!.Value as IReadOnlyList<AgentRunSiblingResponse>;
+        Assert.That(siblings, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(siblings, Has.Count.EqualTo(6));
+            Assert.That(siblings![0].RunId, Is.EqualTo("rid-1"), "ASC sort — oldest iteration first.");
+            Assert.That(siblings[5].RunId, Is.EqualTo("rid-6"), "ASC sort — newest iteration last.");
+            Assert.That(siblings.All(s => s.ThreadId == ThreadId), Is.True,
+                "Every sibling carries the supplied ThreadId.");
+            Assert.That(siblings.All(s => !s.IsCurrent), Is.True,
+                "IsCurrent is false server-side; widget toggles it client-side.");
+        });
+    }
+
+    [Test]
+    public async Task GetSiblingsAsync_UnknownThreadId_Returns200WithEmptyList()
+    {
+        _runReader.GetRunsForThreadAsync("missing-thread", Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(Array.Empty<AgentRunRecord>()));
+
+        var result = await _controller.GetSiblingsAsync("missing-thread", CancellationToken.None);
+
+        var ok = result as OkObjectResult;
+        Assert.That(ok, Is.Not.Null,
+            "Unknown thread returns 200 + empty list (not 404) so the modal still renders.");
+        var siblings = ok!.Value as IReadOnlyList<AgentRunSiblingResponse>;
+        Assert.That(siblings, Is.Not.Null);
+        Assert.That(siblings, Is.Empty);
+    }
+
+    [Test]
+    public async Task GetSiblingsAsync_SingleIterationThread_ReturnsOneSibling()
+    {
+        var record = MakeSibling(_agentId, "rid-solo", DateTime.UtcNow);
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(new[] { record }));
+
+        var result = await _controller.GetSiblingsAsync(ThreadId, CancellationToken.None);
+
+        var siblings = (result as OkObjectResult)!.Value as IReadOnlyList<AgentRunSiblingResponse>;
+        Assert.That(siblings, Has.Count.EqualTo(1));
+        Assert.That(siblings![0].RunId, Is.EqualTo("rid-solo"));
+    }
+
+    [Test]
+    public async Task GetSiblingsAsync_WhitespaceThreadId_Returns400_NoReaderCall()
+    {
+        var result = await _controller.GetSiblingsAsync("   ", CancellationToken.None);
+
+        var objectResult = result as ObjectResult;
+        Assert.That(objectResult, Is.Not.Null);
+        Assert.That(objectResult!.StatusCode, Is.EqualTo(400));
+        await _runReader.DidNotReceiveWithAnyArgs().GetRunsForThreadAsync(default!, default);
+    }
+
+    [Test]
+    public async Task GetSiblingsAsync_ThreadIdExceeds256Chars_Returns400_NoReaderCall()
+    {
+        var oversized = new string('a', 257);
+
+        var result = await _controller.GetSiblingsAsync(oversized, CancellationToken.None);
+
+        var objectResult = result as ObjectResult;
+        Assert.That(objectResult, Is.Not.Null);
+        Assert.That(objectResult!.StatusCode, Is.EqualTo(400));
+        var problem = (ProblemDetails)objectResult.Value!;
+        Assert.That(problem.Detail, Does.Contain("256"));
+        await _runReader.DidNotReceiveWithAnyArgs().GetRunsForThreadAsync(default!, default);
+    }
+
+    [Test]
+    public async Task GetSiblingsAsync_ReaderThrowsNonCancellation_ReturnsEmptyAndLogsWarning()
+    {
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns<Task<IReadOnlyList<AgentRunRecord>>>(_ =>
+                Task.FromException<IReadOnlyList<AgentRunRecord>>(new InvalidOperationException("audit-log offline")));
+
+        var result = await _controller.GetSiblingsAsync(ThreadId, CancellationToken.None);
+
+        var ok = result as OkObjectResult;
+        Assert.That(ok, Is.Not.Null, "NFR-R3 graceful degradation — empty list on reader throw.");
+        var siblings = ok!.Value as IReadOnlyList<AgentRunSiblingResponse>;
+        Assert.That(siblings, Is.Empty);
+
+        _logger.Received(1).Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Test]
+    public void GetSiblingsAsync_OperationCanceledException_PropagatesUnwrapped()
+    {
+        // OperationCanceledException is the canonical "client navigated away"
+        // signal — controllers must rethrow, never swallow.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns<Task<IReadOnlyList<AgentRunRecord>>>(_ =>
+                Task.FromException<IReadOnlyList<AgentRunRecord>>(new OperationCanceledException()));
+
+        Assert.ThrowsAsync<OperationCanceledException>(
+            () => _controller.GetSiblingsAsync(ThreadId, cts.Token));
+    }
+
+    [Test]
+    public async Task GetAsync_SelectedRunId_SelectsMatchingSibling_NotRunsZero()
+    {
+        // Picker submits selectedRunId pointing at iteration #2 in a 3-iteration
+        // batch. Endpoint must surface that iteration's prompt/response, not the
+        // most-recent (runs[0]) one. SelectedRunId echoes back in the response.
+        var baseTime = new DateTime(2026, 5, 21, 17, 0, 0, DateTimeKind.Utc);
+        var records = new[]
+        {
+            MakeSibling(_agentId, "rid-step-3", baseTime.AddSeconds(20)), // runs[0] — most recent
+            MakeSibling(_agentId, "rid-step-2", baseTime.AddSeconds(10)),
+            MakeSibling(_agentId, "rid-step-1", baseTime),
+        };
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(records));
+
+        var result = await _controller.GetAsync(ThreadId, CancellationToken.None, selectedRunId: "rid-step-2");
+
+        var ok = result as OkObjectResult;
+        Assert.That(ok, Is.Not.Null);
+        var response = ok!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response!.RunId, Is.EqualTo(ThreadId),
+                "Response RunId remains the ThreadId for legacy compat.");
+            Assert.That(response.SelectedRunId, Is.EqualTo("rid-step-2"),
+                "Picker selectedRunId echoes back so the widget can verify which iteration rendered.");
+            Assert.That(response.Issues, Has.Count.EqualTo(1));
+            Assert.That(response.Issues[0].Text, Is.EqualTo("flag-rid-step-2"),
+                "Surfaced output is the SELECTED iteration's response — NOT runs[0].");
+        });
+    }
+
+    [Test]
+    public async Task GetAsync_SelectedRunIdUnknownForThread_Returns404ProblemDetails()
+    {
+        var records = new[]
+        {
+            MakeSibling(_agentId, "rid-step-1", DateTime.UtcNow),
+        };
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(records));
+
+        var result = await _controller.GetAsync(ThreadId, CancellationToken.None, selectedRunId: "rid-not-here");
+
+        var objectResult = result as ObjectResult;
+        Assert.That(objectResult, Is.Not.Null);
+        Assert.That(objectResult!.StatusCode, Is.EqualTo(404));
+        var problem = (ProblemDetails)objectResult.Value!;
+        Assert.That(problem.Title, Is.EqualTo("Selected iteration not found."));
+    }
+
+    [Test]
+    public async Task GetAsync_SelectedRunIdOmitted_PreservesPreStory412Behaviour_PicksRunsZero()
+    {
+        // Byte-compatibility pin for Story 4.5 — when no selectedRunId is
+        // supplied (legacy widget or non-picker mode), the controller picks
+        // runs[0] (most-recent) just like before Story 4.12.
+        var baseTime = new DateTime(2026, 5, 21, 17, 0, 0, DateTimeKind.Utc);
+        var records = new[]
+        {
+            MakeSibling(_agentId, "rid-newest", baseTime.AddSeconds(20)),
+            MakeSibling(_agentId, "rid-older", baseTime),
+        };
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(records));
+
+        var result = await _controller.GetAsync(ThreadId, CancellationToken.None);
+
+        var response = (result as OkObjectResult)!.Value as AgentRunDetailResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.That(response!.SelectedRunId, Is.Null,
+            "Legacy non-picker callers see SelectedRunId = null in the response.");
+        Assert.That(response.Issues[0].Text, Is.EqualTo("flag-rid-newest"),
+            "Legacy behaviour selects runs[0] from DESC-ordered list.");
+    }
 }

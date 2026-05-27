@@ -1,7 +1,7 @@
 import { LitElement as m, html as i, nothing as d, css as g, state as c, customElement as p } from "@umbraco-cms/backoffice/external/lit";
 import { UmbElementMixin as b } from "@umbraco-cms/backoffice/element-api";
 import { UMB_AUTH_CONTEXT as h } from "@umbraco-cms/backoffice/auth";
-import { a as y, A as _ } from "./index-DHDbvA7s.js";
+import { a as y, A as _ } from "./index-D8XFU7Ps.js";
 var f = Object.defineProperty, w = Object.getOwnPropertyDescriptor, s = (t, e, a, r) => {
   for (var l = r > 1 ? void 0 : r ? w(e, a) : e, n = t.length - 1, u; n >= 0; n--)
     (u = t[n]) && (l = (r ? u(e, a, l) : u(l)) || l);
@@ -289,4 +289,4 @@ export {
   o as CogworksMemoryWallElement,
   C as default
 };
-//# sourceMappingURL=cogworks-memory-wall.element-Cnv32e6l.js.map
+//# sourceMappingURL=cogworks-memory-wall.element-Dp2PUYKX.js.map

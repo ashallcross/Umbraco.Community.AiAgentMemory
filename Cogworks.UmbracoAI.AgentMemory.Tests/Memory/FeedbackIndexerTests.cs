@@ -713,6 +713,86 @@ public class FeedbackIndexerTests
             Arg.Any<MemoryEntryEntity>(), Arg.Any<CancellationToken>());
     }
 
+    // ═════════════════════════════════════════════════════════════════════
+    // Story 4.12 — selectedRunId-first resolution (AC4.2; AC5 indexer tests)
+    // ═════════════════════════════════════════════════════════════════════
+
+    [Test]
+    public async Task IndexAsync_PerIterationRunId_UsesGetRunAsyncAndIndexesSelectedRun()
+    {
+        // Picker submission path. AgentFeedbackController passes the per-iteration
+        // RunId (rid-step-2) instead of the ThreadId. FeedbackIndexer probes
+        // GetRunAsync(rid-step-2) FIRST + must use THAT iteration's prompt/response
+        // for the digest. Critically: it must NOT fall back to
+        // GetRunsForThreadAsync(rid-step-2)/runs[0] when GetRunAsync resolves.
+        const string selectedRunId = "rid-step-2";
+        var selectedRun = MakeRun(
+            runId: selectedRunId,
+            prompt: "[user] iteration-2 prompt body",
+            response: "[assistant] iteration-2 response body",
+            agentId: _agentId);
+        _runReader.GetRunAsync(selectedRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AgentRunRecord?>(selectedRun));
+
+        // Feedback service must surface a row keyed by the per-iteration RunId.
+        _feedbackService.GetFeedbackForRunAsync(selectedRunId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunFeedback>>(
+                new[] { MakeFeedback("iteration-2 teaching") }));
+
+        await _indexer.IndexAsync(selectedRunId, _agentId, CancellationToken.None);
+
+        // Digest joins the SELECTED iteration's response + prompt (AR35 segment
+        // order: Comment → Response → Prompt). If the indexer accidentally
+        // resolved via GetRunsForThreadAsync first, the embed input would carry
+        // the default `[assistant] hi` body, not "iteration-2 response body".
+        await _embeddingService.Received(1).GenerateEmbeddingAsync(
+            Arg.Any<Action<AIEmbeddingBuilder>>(),
+            "iteration-2 teaching\n\n[assistant] iteration-2 response body\n\n[user] iteration-2 prompt body",
+            Arg.Any<CancellationToken>());
+
+        // GetRunsForThreadAsync MUST NOT be called when GetRunAsync resolves —
+        // pins the selectedRunId-first contract.
+        await _runReader.DidNotReceive().GetRunsForThreadAsync(
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task IndexAsync_LegacyThreadIdRow_FallsBackToGetRunsForThreadAsync()
+    {
+        // Legacy/non-picker path — AgentFeedbackController passed the ThreadId
+        // (pre-Story-4.12 row OR a non-picker submission). GetRunAsync(threadId)
+        // returns null (no audit-row's per-iteration RunId equals the
+        // ThreadId); the indexer falls back to GetRunsForThreadAsync + runs[0]
+        // for byte-compatible behaviour.
+        const string threadId = "legacy-thread-A";
+        _runReader.GetRunAsync(threadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AgentRunRecord?>(null));
+        // GetRunsForThreadAsync returns DESC — runs[0] is most-recent.
+        var threadRuns = new[] { MakeRun(runId: threadId) };
+        _runReader.GetRunsForThreadAsync(threadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(threadRuns));
+        _feedbackService.GetFeedbackForRunAsync(threadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunFeedback>>(
+                new[] { MakeFeedback("legacy comment") }));
+
+        await _indexer.IndexAsync(threadId, _agentId, CancellationToken.None);
+
+        // Both reader methods called, in order: GetRunAsync first (returns
+        // null), then GetRunsForThreadAsync as fallback.
+        Received.InOrder(() =>
+        {
+            _runReader.GetRunAsync(threadId, Arg.Any<CancellationToken>());
+            _runReader.GetRunsForThreadAsync(threadId, Arg.Any<CancellationToken>());
+        });
+
+        // Digest reaches the embed call — pins the fallback path doesn't
+        // silently skip the row.
+        await _embeddingService.Received(1).GenerateEmbeddingAsync(
+            Arg.Any<Action<AIEmbeddingBuilder>>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
         where T : class
     {

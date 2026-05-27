@@ -1,34 +1,34 @@
-import { css as f, state as c, customElement as y, nothing as n, html as o } from "@umbraco-cms/backoffice/external/lit";
-import { UmbModalBaseElement as v } from "@umbraco-cms/backoffice/modal";
-import { UMB_AUTH_CONTEXT as g } from "@umbraco-cms/backoffice/auth";
-import { UMB_CURRENT_USER_CONTEXT as k } from "@umbraco-cms/backoffice/current-user";
-class h extends Error {
+import { css as f, state as c, customElement as y, nothing as u, html as o } from "@umbraco-cms/backoffice/external/lit";
+import { UmbModalBaseElement as k } from "@umbraco-cms/backoffice/modal";
+import { UMB_AUTH_CONTEXT as m } from "@umbraco-cms/backoffice/auth";
+import { UMB_CURRENT_USER_CONTEXT as v } from "@umbraco-cms/backoffice/current-user";
+class p extends Error {
   constructor() {
     super(...arguments), this.name = "AuthContextUnavailableError";
   }
 }
-async function p(e, t, s) {
+async function b(e, t, s) {
   const a = await e();
   if (!a)
-    throw new h("Auth context unavailable");
+    throw new p("Auth context unavailable");
   const i = a.getOpenApiConfiguration();
   let r;
   try {
     r = await i.token();
   } catch {
-    throw new h("Token acquisition failed");
+    throw new p("Token acquisition failed");
   }
   if (!r || r.trim() === "")
-    throw new h("Token acquisition returned empty");
-  const d = s.body !== void 0, b = {
+    throw new p("Token acquisition returned empty");
+  const d = s.body !== void 0, h = {
     Accept: "application/json",
     Authorization: `Bearer ${r}`,
     ...d ? { "Content-Type": "application/json" } : {}
-  }, m = { ...s.headers ?? {} };
-  delete m.Authorization, delete m.authorization;
+  }, g = { ...s.headers ?? {} };
+  delete g.Authorization, delete g.authorization;
   const _ = {
-    ...b,
-    ...m
+    ...h,
+    ...g
   };
   return fetch(`${i.base}${t}`, {
     method: s.method ?? "GET",
@@ -43,9 +43,9 @@ var x = Object.defineProperty, w = Object.getOwnPropertyDescriptor, l = (e, t, s
     (d = e[r]) && (i = (a ? d(t, s, i) : d(i)) || i);
   return a && i && x(t, s, i), i;
 };
-let u = class extends v {
+let n = class extends k {
   constructor() {
-    super(...arguments), this._score = null, this._comment = "", this._state = "idle", this._errorMessage = "", this._runDetailState = "loading", this._runDetail = null, this._existingFeedbackState = "loading", this._existingFeedback = null, this._currentUserId = null, this._abortController = null, this._runDetailAbortController = null, this._existingFeedbackAbortController = null, this._hasSeededFromExisting = !1, this._currentUserIdReady = null, this._dismiss = () => {
+    super(...arguments), this._score = null, this._comment = "", this._state = "idle", this._errorMessage = "", this._runDetailState = "loading", this._runDetail = null, this._existingFeedbackState = "loading", this._existingFeedback = null, this._currentUserId = null, this._siblings = [], this._siblingsState = "loading", this._selectedRunId = null, this._abortController = null, this._runDetailAbortController = null, this._existingFeedbackAbortController = null, this._siblingsAbortController = null, this._hasSeededFromExisting = !1, this._currentUserIdReady = null, this._dismiss = () => {
       this._abortController?.abort(), this._rejectModal();
     }, this._onCommentInput = (e) => {
       this._comment = e.target.value;
@@ -59,15 +59,24 @@ let u = class extends v {
       }
       this._abortController?.abort(), this._abortController = new AbortController(), this._state = "submitting", this._errorMessage = "";
       try {
-        const t = await p(
-          () => this.getContext(g),
+        const t = await b(
+          () => this.getContext(m),
           "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
           {
             method: "POST",
             body: {
               runId: e,
               score: this._score,
-              comment: this._comment.length > 0 ? this._comment : null
+              comment: this._comment.length > 0 ? this._comment : null,
+              // Story 4.12 — picker submissions include selectedRunId so the
+              // controller records feedback under the per-iteration RunId
+              // (creating distinct supersede keys per iteration). Omitted for
+              // non-picker submissions (single-iteration flows) so the legacy
+              // ThreadId-keyed path is preserved byte-compatibly. The "Submit"
+              // button is also disabled while picker arrows are mid-flight, so
+              // selectedRunId here always reflects the iteration the editor
+              // was looking at when they clicked Submit.
+              selectedRunId: this._selectedRunId
             },
             signal: this._abortController.signal
           }
@@ -80,7 +89,7 @@ let u = class extends v {
       } catch (t) {
         if (t instanceof DOMException && t.name === "AbortError")
           return;
-        if (t instanceof h) {
+        if (t instanceof p) {
           this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
           return;
         }
@@ -89,100 +98,183 @@ let u = class extends v {
     };
   }
   connectedCallback() {
-    super.connectedCallback(), this.closest("uui-modal-sidebar")?.setAttribute("size", "small"), this._loadRunDetail(), this._currentUserIdReady = this._resolveCurrentUserId(), this._loadExistingFeedback();
+    super.connectedCallback(), this.closest("uui-modal-sidebar")?.setAttribute("size", "small"), this._loadRunDetail(null), this._currentUserIdReady = this._resolveCurrentUserId(), this._loadExistingFeedback(null), this._loadSiblings();
   }
   disconnectedCallback() {
-    this._abortController?.abort(), this._runDetailAbortController?.abort(), this._existingFeedbackAbortController?.abort(), super.disconnectedCallback();
+    this._abortController?.abort(), this._runDetailAbortController?.abort(), this._existingFeedbackAbortController?.abort(), this._siblingsAbortController?.abort(), super.disconnectedCallback();
   }
   async _resolveCurrentUserId() {
     try {
-      const e = await this.getContext(k);
+      const e = await this.getContext(v);
       this._currentUserId = e?.getUnique() ?? null;
     } catch {
       this._currentUserId = null;
     }
   }
-  async _loadRunDetail() {
-    const e = this.data?.runId ?? "";
-    if (e.length === 0) {
-      this._runDetailState = "unavailable";
-      return;
-    }
+  async _loadRunDetail(e) {
+    const t = this.data?.runId ?? "";
+    if (t.length === 0)
+      return this._runDetailState = "unavailable", !1;
     this._runDetailAbortController?.abort();
-    const t = new AbortController();
-    this._runDetailAbortController = t, this._runDetailState = "loading";
+    const s = new AbortController();
+    this._runDetailAbortController = s, this._runDetailState = "loading";
+    const a = e !== null ? `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(t)}?selectedRunId=${encodeURIComponent(e)}` : `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(t)}`;
     try {
-      const s = await p(
-        () => this.getContext(g),
-        `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(e)}`,
-        { signal: t.signal }
+      const i = await b(
+        () => this.getContext(m),
+        a,
+        { signal: s.signal }
       );
-      if (t.signal.aborted)
-        return;
-      if (!s.ok) {
-        this._runDetailState = "unavailable";
-        return;
-      }
-      const a = await s.json();
-      if (t.signal.aborted)
-        return;
-      if (!Array.isArray(a.issues) || !Array.isArray(a.suggestions)) {
-        this._runDetailState = "unavailable";
-        return;
-      }
-      if (a.score === null && a.issues.length === 0 && a.suggestions.length === 0 && !a.memoryUsed) {
-        this._runDetailState = "unavailable";
-        return;
-      }
-      this._runDetail = a, this._runDetailState = "loaded";
-    } catch (s) {
-      if (s instanceof DOMException && s.name === "AbortError" || t.signal.aborted)
-        return;
-      this._runDetailState = "unavailable";
+      if (s.signal.aborted || this._selectedRunId !== e)
+        return !0;
+      if (!i.ok)
+        return this._runDetailState = "unavailable", !1;
+      const r = await i.json();
+      return s.signal.aborted || this._selectedRunId !== e ? !0 : !Array.isArray(r.issues) || !Array.isArray(r.suggestions) ? (this._runDetailState = "unavailable", !1) : r.score === null && r.issues.length === 0 && r.suggestions.length === 0 && !r.memoryUsed ? (this._runDetailState = "unavailable", !1) : (this._runDetail = r, this._runDetailState = "loaded", !0);
+    } catch (i) {
+      return i instanceof DOMException && i.name === "AbortError" || s.signal.aborted ? !0 : (this._runDetailState = "unavailable", !1);
     }
   }
-  async _loadExistingFeedback() {
-    const e = this.data?.runId ?? "";
-    if (e.length === 0) {
-      this._existingFeedbackState = "unavailable";
-      return;
-    }
+  async _loadExistingFeedback(e) {
+    const t = this.data?.runId ?? "";
+    if (t.length === 0)
+      return this._existingFeedbackState = "unavailable", !1;
     this._existingFeedbackAbortController?.abort();
-    const t = new AbortController();
-    this._existingFeedbackAbortController = t, this._existingFeedbackState = "loading";
+    const s = new AbortController();
+    this._existingFeedbackAbortController = s, this._existingFeedbackState = "loading";
+    const a = e ?? t;
     try {
-      const s = await p(
-        () => this.getContext(g),
-        `/umbraco/management/api/v1/cogworks-agent-memory/feedback/${encodeURIComponent(e)}`,
-        { signal: t.signal }
+      const i = await b(
+        () => this.getContext(m),
+        `/umbraco/management/api/v1/cogworks-agent-memory/feedback/${encodeURIComponent(a)}`,
+        { signal: s.signal }
       );
-      if (t.signal.aborted)
-        return;
-      if (!s.ok) {
-        this._existingFeedbackState = "unavailable";
-        return;
-      }
-      const a = await s.json();
-      if (t.signal.aborted)
-        return;
-      if (!Array.isArray(a.existing)) {
-        this._existingFeedbackState = "unavailable";
-        return;
-      }
-      if (this._existingFeedback = a.existing, this._existingFeedbackState = "loaded", !this._hasSeededFromExisting) {
-        if (this._currentUserIdReady !== null && (await this._currentUserIdReady, t.signal.aborted))
-          return;
+      if (s.signal.aborted || this._selectedRunId !== e)
+        return !0;
+      if (!i.ok)
+        return this._existingFeedbackState = "unavailable", !1;
+      const r = await i.json();
+      if (s.signal.aborted || this._selectedRunId !== e)
+        return !0;
+      if (!Array.isArray(r.existing))
+        return this._existingFeedbackState = "unavailable", !1;
+      if (this._existingFeedback = r.existing, this._existingFeedbackState = "loaded", !this._hasSeededFromExisting) {
+        if (this._currentUserIdReady !== null && (await this._currentUserIdReady, s.signal.aborted))
+          return !0;
         if (!(this._score !== null || this._comment !== "")) {
-          const r = this._findCurrentUserRow(a.existing);
-          r !== void 0 && (this._score = r.score === "Neutral" ? null : r.score, this._comment = r.comment ?? "");
+          const h = this._findCurrentUserRow(r.existing);
+          h !== void 0 && (this._score = h.score === "Neutral" ? null : h.score, this._comment = h.comment ?? "");
         }
         this._hasSeededFromExisting = !0;
       }
+      return !0;
+    } catch (i) {
+      return i instanceof DOMException && i.name === "AbortError" || s.signal.aborted ? !0 : (this._existingFeedbackState = "unavailable", !1);
+    }
+  }
+  /**
+   * Story 4.12 — fetches the per-iteration sibling list for the ThreadId.
+   * When the workflow ran For Each over N items, this surfaces all N agent
+   * invocations so the editor can flip between them via the picker without
+   * leaving the modal.
+   *
+   * Behaviour:
+   *  - `< 2` siblings → picker stays hidden; legacy detail/feedback fetches
+   *    already in flight settle normally. `_selectedRunId` stays `null`.
+   *  - `≥ 2` siblings → initialise `_selectedRunId` to the FIRST iteration
+   *    in the ASC list (oldest first per LD#3a), then kick off refetches of
+   *    detail + feedback targeting that specific iteration. The legacy fetches
+   *    started in `connectedCallback` are aborted via the per-fetch reassign
+   *    so their responses don't clobber selected-sibling state.
+   *  - Any failure (404 / parse / network) → unavailable; widget falls
+   *    through to legacy single-iteration behaviour.
+   */
+  async _loadSiblings() {
+    const e = this.data?.runId ?? "";
+    if (e.length === 0) {
+      this._siblingsState = "unavailable";
+      return;
+    }
+    this._siblingsAbortController?.abort();
+    const t = new AbortController();
+    this._siblingsAbortController = t;
+    try {
+      const s = await b(
+        () => this.getContext(m),
+        `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(e)}/siblings`,
+        { signal: t.signal }
+      );
+      if (t.signal.aborted)
+        return;
+      if (!s.ok) {
+        this._siblingsState = "unavailable";
+        return;
+      }
+      const a = await s.json();
+      if (t.signal.aborted)
+        return;
+      if (!Array.isArray(a)) {
+        this._siblingsState = "unavailable";
+        return;
+      }
+      const i = a;
+      if (this._siblings = i, this._siblingsState = "loaded", i.length > 1) {
+        const r = i[0].runId;
+        this._selectedRunId = r, this._hasSeededFromExisting = !1, this._loadRunDetail(r), this._loadExistingFeedback(r);
+      }
     } catch (s) {
       if (s instanceof DOMException && s.name === "AbortError" || t.signal.aborted)
         return;
-      this._existingFeedbackState = "unavailable";
+      this._siblingsState = "unavailable";
     }
+  }
+  /**
+   * Story 4.12 — picker arrow click handler. Changes `_selectedRunId` to the
+   * sibling at the new index, resets the existing-feedback seed flag so the
+   * form seeds from THAT iteration's prior feedback, and kicks off detail +
+   * feedback refetches.
+   *
+   * Submit-in-flight guard: the picker arrows are disabled in the template
+   * while `_state === "submitting"` so an in-flight feedback POST can't end
+   * up attributed to the wrong iteration. This handler is a defence-in-depth
+   * no-op in that state.
+   *
+   * Failure rollback (AC4.e): when either fetch comes back unavailable, the
+   * picker rolls back to the previous iteration so the editor doesn't see a
+   * mid-state half-populated modal. The previous iteration's content is
+   * deliberately NOT cleared synchronously here — letting it remain visible
+   * during the loading transition (and stay if the new fetch fails) avoids
+   * the "flash to empty" footgun the spec calls out.
+   */
+  async _onPickerChange(e) {
+    if (this._state === "submitting" || e < 0 || e >= this._siblings.length) return;
+    const t = this._siblings[e];
+    if (t.runId === this._selectedRunId) return;
+    const s = [
+      this._selectedRunId,
+      this._runDetail,
+      this._runDetailState,
+      this._existingFeedback,
+      this._existingFeedbackState,
+      this._score,
+      this._comment,
+      this._hasSeededFromExisting
+    ];
+    this._selectedRunId = t.runId, this._hasSeededFromExisting = !1, this._score = null, this._comment = "";
+    const [a, i] = await Promise.all([
+      this._loadRunDetail(t.runId),
+      this._loadExistingFeedback(t.runId)
+    ]);
+    this._selectedRunId === t.runId && (!a || !i) && ([
+      this._selectedRunId,
+      this._runDetail,
+      this._runDetailState,
+      this._existingFeedback,
+      this._existingFeedbackState,
+      this._score,
+      this._comment,
+      this._hasSeededFromExisting
+    ] = s);
   }
   /**
    * Returns the row whose `createdBy` matches the resolved current-user id.
@@ -230,9 +322,9 @@ let u = class extends v {
                 maxlength="4000"
                 .value=${this._comment}
                 @input=${this._onCommentInput}
-              ></uui-textarea>` : n}
+              ></uui-textarea>` : u}
 
-          ${this._state === "error" ? this._renderError() : n}
+          ${this._state === "error" ? this._renderError() : u}
         </uui-box>
 
         <div slot="actions">
@@ -249,7 +341,7 @@ let u = class extends v {
             color="positive"
             label="Submit feedback"
             ?disabled=${r}
-            state=${d ?? n}
+            state=${d ?? u}
             @click=${this._submit}
           >
             Submit feedback
@@ -299,10 +391,10 @@ let u = class extends v {
    */
   _renderExistingFeedback() {
     if (this._existingFeedbackState !== "loaded")
-      return n;
+      return u;
     const e = this._existingFeedback;
     if (e === null || e.length === 0)
-      return n;
+      return u;
     const t = this._findCurrentUserRow(e), s = e.filter((i) => i !== t).sort((i, r) => r.createdUtc.localeCompare(i.createdUtc)), a = t !== void 0 ? [t, ...s] : s;
     return o`
       <uui-box headline="Previous feedback" class="previous-feedback-box">
@@ -334,7 +426,7 @@ let u = class extends v {
               @click=${() => this._onEditClick(e)}
             >
               Edit
-            </uui-button>` : n}
+            </uui-button>` : u}
       </div>
     `;
   }
@@ -353,6 +445,60 @@ let u = class extends v {
     this._score = e.score === "Neutral" ? null : e.score, this._comment = e.comment ?? "", this._state === "error" && (this._state = "idle", this._errorMessage = "");
   }
   /**
+   * Story 4.12 — picker row above the agent-output content. Renders only when
+   * `_siblings.length > 1` (LD#6: single-iteration flows preserve Story 4.5
+   * UX byte-identically). Shape: `[←] Iteration N of M · {hh:mm:ss} [→]` —
+   * agent-agnostic per LD#4; no content-type vocabulary in v0.1.
+   *
+   * Arrows are disabled at boundaries (first iteration: ← disabled; last
+   * iteration: → disabled) AND during in-flight feedback submission
+   * (`_state === "submitting"` per § Failure edges — submit-in-flight + picker
+   * change race protection).
+   *
+   * XSS defence: all picker labels are static strings or trusted timestamp
+   * strings; no user-controlled content is rendered via this template.
+   */
+  _renderPicker() {
+    if (this._siblingsState !== "loaded" || this._siblings.length <= 1)
+      return u;
+    const e = this._siblings.findIndex(
+      (g) => g.runId === this._selectedRunId
+    ), t = e >= 0 ? e : 0, s = this._siblings.length, a = this._siblings[t], i = this._state === "submitting", r = t === 0 || i, d = t === s - 1 || i;
+    let h = a.startedUtc;
+    try {
+      const g = new Date(a.startedUtc);
+      Number.isNaN(g.getTime()) || (h = g.toLocaleTimeString());
+    } catch {
+    }
+    return o`
+      <div class="picker-row" role="group" aria-label="Iteration picker">
+        <uui-button
+          compact
+          look="secondary"
+          label="Previous iteration"
+          class="picker-prev"
+          ?disabled=${r}
+          @click=${() => this._onPickerChange(t - 1)}
+        >
+          ←
+        </uui-button>
+        <span class="picker-counter" aria-live="polite">
+          Iteration ${t + 1} of ${s} · ${h}
+        </span>
+        <uui-button
+          compact
+          look="secondary"
+          label="Next iteration"
+          class="picker-next"
+          ?disabled=${d}
+          @click=${() => this._onPickerChange(t + 1)}
+        >
+          →
+        </uui-button>
+      </div>
+    `;
+  }
+  /**
    * Story 4.2 — DRIFT-4.1-12 closure. Renders the agent's score / flagged
    * issues / suggestions ABOVE the existing feedback form so the editor sees
    * what they're rating. Three states:
@@ -366,11 +512,16 @@ let u = class extends v {
    * fields render via Lit's automatic template-literal HTML-encoding. The
    * Lit's raw-HTML directive is NEVER imported in this file — static grep gate
    * over the directive token returns zero matches.
+   *
+   * Story 4.12 — the picker row is rendered FIRST inside the agent-output
+   * uui-box (above the score/issues/suggestions content) when siblings > 1.
+   * Hidden otherwise.
    */
   _renderAgentOutput() {
     if (this._runDetailState === "loading")
       return o`
         <uui-box headline="Agent output" class="agent-output-box">
+          ${this._renderPicker()}
           <p class="agent-output-loading">
             <uui-loader></uui-loader>
             Loading agent output…
@@ -380,6 +531,7 @@ let u = class extends v {
     if (this._runDetailState === "unavailable" || this._runDetail === null)
       return o`
         <uui-box headline="Agent output" class="agent-output-box">
+          ${this._renderPicker()}
           <p class="agent-output-unavailable">
             Agent output unavailable; you can still submit feedback below.
           </p>
@@ -394,13 +546,14 @@ let u = class extends v {
               class="memory-used-badge"
             >
               Memory used
-            </uui-tag>` : n}
+            </uui-tag>` : u}
+        ${this._renderPicker()}
         <p class="agent-output-identity">
           ${e.agentDisplayName ?? `Agent ${e.agentId?.slice(0, 8) ?? "unknown"}`}
         </p>
         ${e.score !== null ? o`<p class="agent-output-score">
               Score: <strong>${e.score}</strong>
-            </p>` : n}
+            </p>` : u}
         ${t ? o`
               <h5 class="agent-output-section-heading">Flagged issues</h5>
               <ul class="agent-output-issues">
@@ -410,12 +563,12 @@ let u = class extends v {
                       <span class="agent-output-issue-text">${r.text}</span>
                       ${r.reason ? o`<span class="agent-output-issue-reason">
                             — ${r.reason}
-                          </span>` : n}
+                          </span>` : u}
                     </li>
                   `
     )}
               </ul>
-            ` : n}
+            ` : u}
         ${s ? o`
               <h5 class="agent-output-section-heading">Suggestions</h5>
               <ul class="agent-output-suggestions">
@@ -423,8 +576,8 @@ let u = class extends v {
       (r) => o`<li>${r}</li>`
     )}
               </ul>
-            ` : n}
-        ${a ? n : o`<p class="agent-output-empty-note">
+            ` : u}
+        ${a ? u : o`<p class="agent-output-empty-note">
               (no structured output captured for this run)
             </p>`}
         ${i ? o`
@@ -448,7 +601,7 @@ let u = class extends v {
     )}
                 </ul>
               </details>
-            ` : n}
+            ` : u}
       </uui-box>
     `;
   }
@@ -486,7 +639,7 @@ let u = class extends v {
     this._state = "error", this._errorMessage = "Something went wrong submitting your feedback. Try again — if it keeps failing, refresh the page.";
   }
 };
-u.styles = f`
+n.styles = f`
     :host {
       display: block;
       font-family: var(--uui-font-family);
@@ -677,38 +830,63 @@ u.styles = f`
       color: var(--uui-color-text-alt);
       font-style: italic;
     }
+
+    /* Story 4.12 — picker row at the top of the agent-output uui-box.
+       Single horizontal row, agent-agnostic shape. Token-driven foreground
+       per Story 3.4 precedent (uui-color-text-alt). */
+    .picker-row {
+      display: flex;
+      align-items: center;
+      gap: var(--uui-size-space-2);
+      margin: 0 0 var(--uui-size-space-3) 0;
+    }
+
+    .picker-counter {
+      color: var(--uui-color-text-alt);
+      font-size: var(--uui-type-small-size, 0.875rem);
+      font-variant-numeric: tabular-nums;
+    }
   `;
 l([
   c()
-], u.prototype, "_score", 2);
+], n.prototype, "_score", 2);
 l([
   c()
-], u.prototype, "_comment", 2);
+], n.prototype, "_comment", 2);
 l([
   c()
-], u.prototype, "_state", 2);
+], n.prototype, "_state", 2);
 l([
   c()
-], u.prototype, "_errorMessage", 2);
+], n.prototype, "_errorMessage", 2);
 l([
   c()
-], u.prototype, "_runDetailState", 2);
+], n.prototype, "_runDetailState", 2);
 l([
   c()
-], u.prototype, "_runDetail", 2);
+], n.prototype, "_runDetail", 2);
 l([
   c()
-], u.prototype, "_existingFeedbackState", 2);
+], n.prototype, "_existingFeedbackState", 2);
 l([
   c()
-], u.prototype, "_existingFeedback", 2);
+], n.prototype, "_existingFeedback", 2);
 l([
   c()
-], u.prototype, "_currentUserId", 2);
-u = l([
+], n.prototype, "_currentUserId", 2);
+l([
+  c()
+], n.prototype, "_siblings", 2);
+l([
+  c()
+], n.prototype, "_siblingsState", 2);
+l([
+  c()
+], n.prototype, "_selectedRunId", 2);
+n = l([
   y("cogworks-agent-feedback")
-], u);
-const F = [
+], n);
+const I = [
   {
     type: "modal",
     alias: "Ua.Modal.RunDetail",
@@ -733,7 +911,7 @@ const F = [
     type: "dashboard",
     alias: "Cogworks.AgentMemory.Dashboard.MemoryWall",
     name: "Memory Learning Wall",
-    element: () => import("./cogworks-memory-wall.element-Cnv32e6l.js"),
+    element: () => import("./cogworks-memory-wall.element-Dp2PUYKX.js"),
     weight: 100,
     meta: {
       label: "Memory Learning Wall",
@@ -748,8 +926,8 @@ const F = [
   }
 ];
 export {
-  h as A,
-  p as a,
-  F as m
+  p as A,
+  b as a,
+  I as m
 };
-//# sourceMappingURL=index-DHDbvA7s.js.map
+//# sourceMappingURL=index-D8XFU7Ps.js.map

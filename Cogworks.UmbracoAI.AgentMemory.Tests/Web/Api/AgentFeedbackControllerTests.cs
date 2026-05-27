@@ -333,4 +333,129 @@ public class AgentFeedbackControllerTests
         Assert.ThrowsAsync<InvalidOperationException>(
             () => _controller.PostAsync(request, CancellationToken.None));
     }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Story 4.12 — selectedRunId picker path (AC4.1; AC5 controller tests)
+    // ═════════════════════════════════════════════════════════════════════
+
+    [Test]
+    public async Task PostAsync_SelectedRunIdSupplied_RecordsAgainstSelectedRunId_NotThreadId()
+    {
+        // Batch picker submission: threadId = "thread-A"; user picks iteration
+        // "rid-step-2" out of 3 siblings. Controller must record feedback under
+        // RunId="rid-step-2" + enqueue indexer with the same per-iteration RunId.
+        // Each sibling's AgentRunRecord carries the SAME agentId (single-agent
+        // workflow) — the controller resolves agentId from the selected sibling.
+        var siblingAgentId = Guid.NewGuid();
+        var siblings = new[]
+        {
+            MakeRunRecord(siblingAgentId, "rid-step-3"),
+            MakeRunRecord(siblingAgentId, "rid-step-2"),
+            MakeRunRecord(siblingAgentId, "rid-step-1"),
+        };
+        _runReader.GetRunsForThreadAsync("thread-A", Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(siblings));
+
+        var request = new AgentFeedbackPostRequest(
+            RunId: "thread-A",
+            Score: FeedbackScore.ThumbsDown,
+            Comment: "iteration-specific teaching",
+            SelectedRunId: "rid-step-2");
+
+        var result = await _controller.PostAsync(request, CancellationToken.None);
+
+        Assert.That(result, Is.InstanceOf<OkResult>(),
+            "Picker submission with a valid selectedRunId returns Ok.");
+
+        await _feedbackService.Received(1).RecordFeedbackAsync(
+            "rid-step-2",                       // feedbackRunId = selectedRunId
+            siblingAgentId,
+            FeedbackScore.ThumbsDown,
+            "iteration-specific teaching",
+            _resolvedUserKey,
+            Arg.Any<CancellationToken>());
+
+        // Indexer enqueued with the per-iteration RunId so FeedbackIndexer
+        // embeds THAT iteration's prompt/response, not runs[0]'s.
+        _indexer.Received(1).EnqueueIndex("rid-step-2", siblingAgentId);
+
+        // The ThreadId-keyed enqueue path MUST NOT fire on picker submissions
+        // — otherwise we'd index against the legacy ThreadId row in addition
+        // to (or instead of) the selected iteration.
+        _indexer.DidNotReceive().EnqueueIndex("thread-A", Arg.Any<Guid>());
+    }
+
+    [Test]
+    public async Task PostAsync_SelectedRunIdNotFoundInSiblingGroup_Returns404_NoServiceCall()
+    {
+        var siblings = new[] { MakeRunRecord(Guid.NewGuid(), "rid-step-1") };
+        _runReader.GetRunsForThreadAsync("thread-A", Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(siblings));
+
+        var request = new AgentFeedbackPostRequest(
+            RunId: "thread-A",
+            Score: FeedbackScore.ThumbsUp,
+            Comment: null,
+            SelectedRunId: "rid-does-not-exist");
+
+        var result = await _controller.PostAsync(request, CancellationToken.None);
+
+        var objectResult = result as ObjectResult;
+        Assert.That(objectResult, Is.Not.Null);
+        Assert.That(objectResult!.StatusCode, Is.EqualTo(StatusCodes.Status404NotFound));
+        var problem = (ProblemDetails)objectResult.Value!;
+        Assert.That(problem.Title, Is.EqualTo("Selected iteration not found."));
+
+        await _feedbackService.DidNotReceiveWithAnyArgs().RecordFeedbackAsync(
+            default!, default, default, default, default, default);
+        _indexer.DidNotReceiveWithAnyArgs().EnqueueIndex(default!, default);
+    }
+
+    [Test]
+    public async Task PostAsync_SelectedRunIdOmitted_PreservesPreStory412ThreadIdKeyedBehaviour()
+    {
+        // Byte-compatibility pin for Story 2.3 + Story 4.5 — when SelectedRunId
+        // is null, the controller records feedback under the ThreadId-shaped
+        // RunId field exactly as before. Tests must verify the LEGACY path
+        // didn't accidentally switch to selectedRunId-keyed.
+        var request = new AgentFeedbackPostRequest(
+            RunId: "thread-A",
+            Score: FeedbackScore.ThumbsUp,
+            Comment: "legacy submission");
+
+        var result = await _controller.PostAsync(request, CancellationToken.None);
+
+        Assert.That(result, Is.InstanceOf<OkResult>());
+
+        // Records against the ThreadId-shaped RunId, using runs[0].AgentId.
+        await _feedbackService.Received(1).RecordFeedbackAsync(
+            "thread-A",
+            _agentId,
+            FeedbackScore.ThumbsUp,
+            "legacy submission",
+            _resolvedUserKey,
+            Arg.Any<CancellationToken>());
+        _indexer.Received(1).EnqueueIndex("thread-A", _agentId);
+    }
+
+    [Test]
+    public async Task PostAsync_SelectedRunIdExceeds256Chars_Returns400_NoServiceCall()
+    {
+        var request = new AgentFeedbackPostRequest(
+            RunId: "thread-A",
+            Score: FeedbackScore.ThumbsUp,
+            Comment: null,
+            SelectedRunId: new string('a', AgentFeedbackController.RunIdMaxChars + 1));
+
+        var result = await _controller.PostAsync(request, CancellationToken.None);
+
+        var objectResult = result as ObjectResult;
+        Assert.That(objectResult, Is.Not.Null);
+        Assert.That(objectResult!.StatusCode, Is.EqualTo(StatusCodes.Status400BadRequest));
+        var problem = (ProblemDetails)objectResult.Value!;
+        Assert.That(problem.Detail, Does.Contain("selectedRunId"));
+
+        await _feedbackService.DidNotReceiveWithAnyArgs().RecordFeedbackAsync(
+            default!, default, default, default, default, default);
+    }
 }
