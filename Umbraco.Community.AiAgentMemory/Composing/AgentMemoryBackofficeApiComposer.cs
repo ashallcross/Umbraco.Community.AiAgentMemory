@@ -26,11 +26,28 @@ namespace Umbraco.Community.AiAgentMemory.Composing;
 /// <see cref="AgentMemoryComposer"/> covers core service registration.
 /// </summary>
 /// <remarks>
-/// All three registration sites are idempotent under repeated <see cref="Compose"/>
+/// <para>All three registration sites are idempotent under repeated <see cref="Compose"/>
 /// calls, mirroring <see cref="AgentMemoryComposer"/>'s TryAddEnumerable pattern:
 /// the <see cref="IOperationIdHandler"/> and <see cref="IConfigureOptions{SwaggerGenOptions}"/>
 /// registrations use <c>TryAddEnumerable</c> for (service, impl) tuple dedup; the
-/// ApplicationPart registration self-guards inside the configure action.
+/// ApplicationPart registration self-guards inside the configure action.</para>
+///
+/// <para>Story 5.3 DRIFT-5.3-4: <c>AgentMemorySwaggerGenOptionsSetup.Configure</c> pre-emptively
+/// registers <c>SwaggerDocs["automate-management"]</c> if-absent to short-circuit
+/// <c>Umbraco.Automate.AddUmbracoAutomateManagementApi</c>'s outer guard. Pre-Story-5.3
+/// our composer FullName <c>Cogworks.UmbracoAI.AgentMemory.*</c> sorted before
+/// <c>Umbraco.*</c> alphabetically and the upstream race resolved harmlessly. Post-rename
+/// our FullName is <c>Umbraco.Community.AiAgentMemory.*</c>, indirectly shifting upstream
+/// composer ordering enough that <c>Umbraco.Automate</c>'s
+/// <c>MapType&lt;System.Type&gt;</c> call (unguarded against the underlying
+/// <c>CustomTypeMappings</c> dict — guarded only on <c>SwaggerDocs</c>) collides with
+/// <c>Umbraco.AI.Web</c>'s prior defensively-guarded <c>MapType&lt;System.Type&gt;</c>
+/// registration at boot. We can't <c>[ComposeBefore(typeof(UmbracoAutomateComposer))]</c>
+/// without taking a hard PackageReference on <c>Umbraco.Automate</c> (heavy: Automate is
+/// only required by the demo TestSite, not the shipped package), so we mitigate at the
+/// callback layer by ensuring Automate's outer guard short-circuits before its unguarded
+/// MapType ever fires. v0.2 candidate: drop this when Umbraco.Automate ships a guarded
+/// MapType call upstream.</para>
 /// </remarks>
 public sealed class AgentMemoryBackofficeApiComposer : IComposer
 {
@@ -68,10 +85,32 @@ public sealed class AgentMemoryBackofficeApiComposer : IComposer
         {
             opt.SwaggerDoc(Constants.ApiName, new OpenApiInfo
             {
-                Title = "Cogworks AI Agent Memory Backoffice API",
+                Title = "AI Agent Memory Backoffice API",
                 Version = "1.0",
             });
             opt.OperationFilter<AgentMemoryOperationSecurityFilter>();
+
+            // DRIFT-5.3-4 mitigation — see class-level XML doc § Story 5.3.
+            // Pre-register the upstream Umbraco.Automate management-API SwaggerDoc
+            // if-absent so Automate's outer guard
+            // (`!options.SwaggerGeneratorOptions.SwaggerDocs.ContainsKey("automate-management")`)
+            // short-circuits before its unguarded `MapType<System.Type>` call fires.
+            // Side-effect: the swagger doc placeholder we register is replaced with no
+            // operation filter, so the `automate-management` doc UI won't show operations
+            // — but the adopter-facing /umbraco/management/api/v1/automate/* routes
+            // still function normally; only the swagger documentation under that doc
+            // key is degraded. Adopter who needs the swagger UI for automate-management
+            // can drop this mitigation once Umbraco.Automate ships a guarded MapType
+            // call upstream.
+            if (!opt.SwaggerGeneratorOptions.SwaggerDocs.ContainsKey("automate-management"))
+            {
+                opt.SwaggerDoc("automate-management", new OpenApiInfo
+                {
+                    Title = "Umbraco Automate Management API",
+                    Version = "Latest",
+                    Description = "Placeholder doc registered by Umbraco.Community.AiAgentMemory to mitigate an upstream race in Umbraco.Automate.AddUmbracoAutomateManagementApi.",
+                });
+            }
         }
     }
 
