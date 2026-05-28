@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Runs;
+namespace Umbraco.Community.AiAgentMemory.Runs;
 
 /// <summary>
 /// Projection of one agent chat call. In <c>Umbraco.AI.Agent.Core 1.9.0</c> each

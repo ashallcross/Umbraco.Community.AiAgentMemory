@@ -1,12 +1,12 @@
-using Cogworks.UmbracoAI.AgentMemory.Composing;
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Memory;
-using Cogworks.UmbracoAI.AgentMemory.Middleware;
-using Cogworks.UmbracoAI.AgentMemory.Persistence;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
-using Cogworks.UmbracoAI.AgentMemory.Runs;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api;
+using Umbraco.Community.AiAgentMemory.Composing;
+using Umbraco.Community.AiAgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Memory;
+using Umbraco.Community.AiAgentMemory.Middleware;
+using Umbraco.Community.AiAgentMemory.Persistence;
+using Umbraco.Community.AiAgentMemory.Persistence.Repositories;
+using Umbraco.Community.AiAgentMemory.Runs;
+using Umbraco.Community.AiAgentMemory.Web.Api;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,7 +18,7 @@ using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 using Umbraco.Cms.Persistence.EFCore.Scoping;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Composing;
+namespace Umbraco.Community.AiAgentMemory.Tests.Composing;
 
 /// <summary>
 /// AR4 startup-validation gate. Catches captive-dependency / lifetime mismatch

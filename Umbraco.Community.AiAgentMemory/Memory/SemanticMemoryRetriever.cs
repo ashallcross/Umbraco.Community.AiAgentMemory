@@ -1,7 +1,7 @@
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
+using Umbraco.Community.AiAgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -11,7 +11,7 @@ using Umbraco.AI.Core.Models;
 using Umbraco.AI.Core.Profiles;
 using Umbraco.AI.Search.Core.VectorStore;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Memory;
+namespace Umbraco.Community.AiAgentMemory.Memory;
 
 /// <summary>
 /// Semantic memory retriever — embeds the current chat input via Umbraco.AI's
@@ -172,7 +172,7 @@ internal sealed class SemanticMemoryRetriever : IMemoryRetriever
                 configure => configure
                     .WithAlias("cogworks-agent-memory-retriever")
                     .WithProfile(profile.Id)
-                    .WithDescription("Cogworks.UmbracoAI.AgentMemory SemanticMemoryRetriever query"),
+                    .WithDescription("Umbraco.Community.AiAgentMemory SemanticMemoryRetriever query"),
                 embedInput,
                 cancellationToken).ConfigureAwait(false);
         }

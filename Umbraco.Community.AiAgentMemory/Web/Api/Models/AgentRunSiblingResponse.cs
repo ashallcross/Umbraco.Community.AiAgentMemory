@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+namespace Umbraco.Community.AiAgentMemory.Web.Api.Models;
 
 /// <summary>
 /// One per-iteration entry returned by

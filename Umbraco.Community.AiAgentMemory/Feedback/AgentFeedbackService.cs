@@ -1,8 +1,8 @@
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence.Repositories;
 using Microsoft.Extensions.Logging;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Feedback;
+namespace Umbraco.Community.AiAgentMemory.Feedback;
 
 /// <summary>
 /// Default <see cref="IAgentFeedbackService"/> implementation. Composes on

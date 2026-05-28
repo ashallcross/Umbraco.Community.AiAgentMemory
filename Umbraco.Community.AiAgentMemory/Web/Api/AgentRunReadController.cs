@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Asp.Versioning;
-using Cogworks.UmbracoAI.AgentMemory.Runs;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+using Umbraco.Community.AiAgentMemory.Runs;
+using Umbraco.Community.AiAgentMemory.Web.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +12,7 @@ using Umbraco.Cms.Api.Management.Controllers;
 using Umbraco.Cms.Api.Management.Routing;
 using Umbraco.Cms.Web.Common.Authorization;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Web.Api;
+namespace Umbraco.Community.AiAgentMemory.Web.Api;
 
 /// <summary>
 /// Story 4.2 — Backoffice Management API for reading an agent run's identity +

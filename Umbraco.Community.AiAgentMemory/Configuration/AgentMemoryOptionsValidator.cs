@@ -1,7 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Options;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Configuration;
+namespace Umbraco.Community.AiAgentMemory.Configuration;
 
 /// <summary>
 /// Validates <see cref="AgentMemoryOptions"/> at first read per AR3.

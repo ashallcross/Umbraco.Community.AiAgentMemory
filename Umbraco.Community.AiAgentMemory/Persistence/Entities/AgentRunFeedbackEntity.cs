@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
+namespace Umbraco.Community.AiAgentMemory.Persistence.Entities;
 
 /// <summary>
 /// One row of editor feedback against an agent run. Persisted to

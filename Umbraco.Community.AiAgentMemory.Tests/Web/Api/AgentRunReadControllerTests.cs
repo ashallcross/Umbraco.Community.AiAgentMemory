@@ -1,11 +1,11 @@
-using Cogworks.UmbracoAI.AgentMemory.Runs;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+using Umbraco.Community.AiAgentMemory.Runs;
+using Umbraco.Community.AiAgentMemory.Web.Api;
+using Umbraco.Community.AiAgentMemory.Web.Api.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Umbraco.AI.Agent.Core.Agents;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Web.Api;
+namespace Umbraco.Community.AiAgentMemory.Tests.Web.Api;
 
 /// <summary>
 /// Story 4.2 AC4 — tests for <see cref="AgentRunReadController"/>.

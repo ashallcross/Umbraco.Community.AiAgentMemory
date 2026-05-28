@@ -1,6 +1,6 @@
-using Cogworks.UmbracoAI.AgentMemory.Memory;
+using Umbraco.Community.AiAgentMemory.Memory;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Memory;
+namespace Umbraco.Community.AiAgentMemory.Tests.Memory;
 
 /// <summary>
 /// Pins the persistence contract on <see cref="IndexingStatus"/> ordinals.

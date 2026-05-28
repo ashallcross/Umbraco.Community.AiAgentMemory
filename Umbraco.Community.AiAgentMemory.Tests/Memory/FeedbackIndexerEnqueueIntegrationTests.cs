@@ -1,11 +1,11 @@
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Memory;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
-using Cogworks.UmbracoAI.AgentMemory.Runs;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+using Umbraco.Community.AiAgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Memory;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence.Repositories;
+using Umbraco.Community.AiAgentMemory.Runs;
+using Umbraco.Community.AiAgentMemory.Web.Api;
+using Umbraco.Community.AiAgentMemory.Web.Api.Models;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -18,7 +18,7 @@ using Umbraco.Cms.Core.HostedServices;
 using Umbraco.Cms.Core.Models.Membership;
 using Umbraco.Cms.Core.Security;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Memory;
+namespace Umbraco.Community.AiAgentMemory.Tests.Memory;
 
 /// <summary>
 /// Story 3.1 Task 6 — integration spine. Drives controller → indexer →

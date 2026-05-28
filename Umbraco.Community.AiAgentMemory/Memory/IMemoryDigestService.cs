@@ -1,7 +1,7 @@
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Runs;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Runs;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Memory;
+namespace Umbraco.Community.AiAgentMemory.Memory;
 
 /// <summary>
 /// Generates a compact textual digest of an agent run for storage and retrieval.

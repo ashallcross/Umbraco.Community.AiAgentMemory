@@ -1,7 +1,7 @@
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Persistence;
+namespace Umbraco.Community.AiAgentMemory.Persistence;
 
 /// <summary>
 /// EF Core context owning ONLY the package's two tables. Composes alongside —

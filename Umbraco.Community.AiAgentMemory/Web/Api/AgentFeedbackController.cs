@@ -1,8 +1,8 @@
 using Asp.Versioning;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Memory;
-using Cogworks.UmbracoAI.AgentMemory.Runs;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Memory;
+using Umbraco.Community.AiAgentMemory.Runs;
+using Umbraco.Community.AiAgentMemory.Web.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -13,7 +13,7 @@ using Umbraco.Cms.Api.Management.Routing;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Web.Common.Authorization;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Web.Api;
+namespace Umbraco.Community.AiAgentMemory.Web.Api;
 
 /// <summary>
 /// Story 2.2 — Backoffice Management API for recording editor feedback against

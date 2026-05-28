@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Memory;
+namespace Umbraco.Community.AiAgentMemory.Memory;
 
 /// <summary>
 /// Lifecycle state of a <see cref="Persistence.Entities.MemoryEntryEntity"/>'s

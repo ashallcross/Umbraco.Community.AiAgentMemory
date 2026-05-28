@@ -1,8 +1,8 @@
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence.Repositories;
+using Umbraco.Community.AiAgentMemory.Web.Api;
+using Umbraco.Community.AiAgentMemory.Web.Api.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using NSubstitute.ExceptionExtensions;
@@ -10,7 +10,7 @@ using Umbraco.AI.Agent.Core.Agents;
 using Umbraco.Cms.Core.Models.Membership;
 using Umbraco.Cms.Core.Services;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Web.Api;
+namespace Umbraco.Community.AiAgentMemory.Tests.Web.Api;
 
 /// <summary>
 /// Story 4.9 AC7.b — tests for <see cref="MemoryEntriesReadController"/>.

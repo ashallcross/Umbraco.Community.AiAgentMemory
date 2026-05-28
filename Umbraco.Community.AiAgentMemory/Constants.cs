@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory;
+namespace Umbraco.Community.AiAgentMemory;
 
 /// <summary>
 /// Shared constants for the package.
@@ -21,8 +21,12 @@ public static class Constants
     /// <c>/umbraco/management/api/v1/cogworks-agent-memory/</c> via
     /// <c>[VersionedApiBackOfficeRoute("cogworks-agent-memory/...")]</c> (the
     /// framework prepends <c>/management/api/v{version:apiVersion}/</c>).
-    /// AR21 brand-rename: this value is renamed in lockstep with PackageId /
-    /// namespace at the brand-rename pass.
+    /// AR12/AR20 brand-rename boundary: this value is RENAME-IMMUTABLE; the
+    /// <c>cogworks-agent-memory</c> package-scope segment stays stable through
+    /// the brand rename (only the <c>/management/api/v{version}/</c> segment is
+    /// framework-enforced via <c>VersionedApiBackOfficeRouteAttribute</c>; the
+    /// <c>cogworks-agent-memory</c> slug is the package-owned rename-stable
+    /// anchor reconciled at Story 2.2 2026-05-12).
     /// </remarks>
     public const string ApiName = "cogworks-agent-memory";
 
@@ -40,7 +44,12 @@ public static class Constants
     public const string MemoryEntriesTableName = "cogworks_agent_memory_entries";
 
     /// <summary>
-    /// Migration plan name (also used as the migration history key).
+    /// Migration plan name (also used as the migration history key in
+    /// <c>umbracoKeyValue</c>). PINNED to the legacy value through the
+    /// Story 5.3 brand rename per LD#R3 — renaming this without a
+    /// key-value seed migration would cause Umbraco to think the renamed
+    /// plan has never executed and re-run all package migrations on
+    /// adopter upgrade. v0.2 candidate: rename + seed-migration step.
     /// </summary>
     public const string MigrationPlanName = "Cogworks.UmbracoAI.AgentMemory";
 

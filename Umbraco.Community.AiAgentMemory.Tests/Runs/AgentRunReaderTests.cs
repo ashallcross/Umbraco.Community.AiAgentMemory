@@ -1,12 +1,12 @@
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
-using Cogworks.UmbracoAI.AgentMemory.Runs;
+using Umbraco.Community.AiAgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Runs;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute.ExceptionExtensions;
 using Umbraco.AI.Core.AuditLog;
 using Umbraco.AI.Core.Models;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Runs;
+namespace Umbraco.Community.AiAgentMemory.Tests.Runs;
 
 /// <summary>
 /// Tests for <see cref="AgentRunReader"/>. Mocks <see cref="IAIAuditLogService"/> via

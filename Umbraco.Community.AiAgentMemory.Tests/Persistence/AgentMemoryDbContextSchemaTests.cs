@@ -1,9 +1,9 @@
-using Cogworks.UmbracoAI.AgentMemory.Persistence;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Persistence;
+namespace Umbraco.Community.AiAgentMemory.Tests.Persistence;
 
 /// <summary>
 /// EF Core schema-shape verification for <see cref="AgentMemoryDbContext"/>.

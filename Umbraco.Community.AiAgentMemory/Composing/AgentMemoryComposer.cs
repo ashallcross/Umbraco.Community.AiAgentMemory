@@ -1,19 +1,19 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Memory;
-using Cogworks.UmbracoAI.AgentMemory.Middleware;
-using Cogworks.UmbracoAI.AgentMemory.Persistence;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
-using Cogworks.UmbracoAI.AgentMemory.Runs;
+using Umbraco.Community.AiAgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Memory;
+using Umbraco.Community.AiAgentMemory.Middleware;
+using Umbraco.Community.AiAgentMemory.Persistence;
+using Umbraco.Community.AiAgentMemory.Persistence.Repositories;
+using Umbraco.Community.AiAgentMemory.Runs;
 using Umbraco.AI.Extensions;
 using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 using Umbraco.Extensions;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Composing;
+namespace Umbraco.Community.AiAgentMemory.Composing;
 
 /// <summary>
 /// Single composition root for the package (AR1). Auto-discovered by Umbraco

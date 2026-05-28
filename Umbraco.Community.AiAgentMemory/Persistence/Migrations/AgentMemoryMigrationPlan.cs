@@ -1,6 +1,6 @@
 using Umbraco.Cms.Core.Packaging;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Persistence.Migrations;
+namespace Umbraco.Community.AiAgentMemory.Persistence.Migrations;
 
 /// <summary>
 /// Package migration plan. Auto-discovered by Umbraco's assembly scanning —

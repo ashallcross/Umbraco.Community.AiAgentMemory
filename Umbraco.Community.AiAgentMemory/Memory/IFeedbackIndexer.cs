@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Memory;
+namespace Umbraco.Community.AiAgentMemory.Memory;
 
 /// <summary>
 /// Out-of-band background indexer that, on every successful feedback POST,

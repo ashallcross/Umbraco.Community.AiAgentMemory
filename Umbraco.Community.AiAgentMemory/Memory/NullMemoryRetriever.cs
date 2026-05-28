@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Memory;
+namespace Umbraco.Community.AiAgentMemory.Memory;
 
 /// <summary>
 /// Placeholder retriever that returns no memories. Retained post Story 3.2 for

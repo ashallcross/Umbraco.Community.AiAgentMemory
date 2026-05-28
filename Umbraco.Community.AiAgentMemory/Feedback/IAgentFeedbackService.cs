@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Feedback;
+namespace Umbraco.Community.AiAgentMemory.Feedback;
 
 /// <summary>
 /// Records and queries editor feedback against agent runs. Supersede semantics

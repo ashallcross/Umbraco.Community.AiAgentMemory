@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
+namespace Umbraco.Community.AiAgentMemory.Persistence.Entities;
 
 /// <summary>
 /// One memory entry — digest text + reference to the embedding upserted into

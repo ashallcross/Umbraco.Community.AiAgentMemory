@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Infrastructure.Migrations;
 using Umbraco.Cms.Infrastructure.Persistence.DatabaseAnnotations;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Persistence.Migrations;
+namespace Umbraco.Community.AiAgentMemory.Persistence.Migrations;
 
 /// <summary>
 /// Creates the package's two tables on first install: <see cref="Constants.FeedbackTableName"/>

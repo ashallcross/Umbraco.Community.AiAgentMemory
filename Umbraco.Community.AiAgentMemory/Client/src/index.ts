@@ -1,4 +1,4 @@
-// Entry point for the Cogworks.UmbracoAI.AgentMemory frontend bundle.
+// Entry point for the Umbraco.Community.AiAgentMemory frontend bundle.
 // Bellissima reads NAMED exports from this module (per Story 0.A § Locked
 // decision (c)). The side-effect import below MUST come BEFORE the `manifests`
 // export so `customElements.define("cogworks-agent-feedback", ...)` has run

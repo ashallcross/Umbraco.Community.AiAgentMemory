@@ -1,14 +1,14 @@
-using Cogworks.UmbracoAI.AgentMemory.Composing;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+using Umbraco.Community.AiAgentMemory.Composing;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Web.Api;
+using Umbraco.Community.AiAgentMemory.Web.Api.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using NSubstitute.ExceptionExtensions;
 using Umbraco.Cms.Core.Models.Membership;
 using Umbraco.Cms.Core.Services;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Web.Api;
+namespace Umbraco.Community.AiAgentMemory.Tests.Web.Api;
 
 /// <summary>
 /// Story 4.5 AC7 — tests for <see cref="AgentFeedbackReadController"/>.

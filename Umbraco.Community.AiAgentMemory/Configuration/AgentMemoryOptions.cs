@@ -1,7 +1,7 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Configuration;
+namespace Umbraco.Community.AiAgentMemory.Configuration;
 
 /// <summary>
-/// Bound configuration for <see cref="Cogworks.UmbracoAI.AgentMemory"/>.
+/// Bound configuration for <see cref="Umbraco.Community.AiAgentMemory"/>.
 /// Maps to the <c>Cogworks:AgentMemory</c> section of <c>appsettings.json</c>
 /// (sourced via <see cref="Constants.ConfigSection"/>).
 /// </summary>

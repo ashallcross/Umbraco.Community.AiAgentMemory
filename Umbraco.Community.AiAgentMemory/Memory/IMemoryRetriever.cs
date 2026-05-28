@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Memory;
+namespace Umbraco.Community.AiAgentMemory.Memory;
 
 /// <summary>
 /// Finds relevant past runs for the current agent invocation. Production

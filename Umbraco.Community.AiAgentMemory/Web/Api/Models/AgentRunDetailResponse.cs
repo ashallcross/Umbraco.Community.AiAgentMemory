@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+namespace Umbraco.Community.AiAgentMemory.Web.Api.Models;
 
 /// <summary>
 /// Read-only projection of an agent run's identity + parsed structured output
@@ -84,7 +84,7 @@ public sealed record AgentRunDetailIssue(string Text, string? Reason);
 /// </summary>
 /// <remarks>
 /// Parser contract per <c>MemoryInjectionMiddleware.BuildMemorySystemMessage</c>
-/// at <c>Cogworks.UmbracoAI.AgentMemory/Middleware/MemoryInjectionMiddleware.cs:215-250</c>.
+/// at <c>Umbraco.Community.AiAgentMemory/Middleware/MemoryInjectionMiddleware.cs:215-250</c>.
 /// Bullet shape: <c>"• Run {first8} {emoji}: {summary} — \"{comment}\""</c>
 /// where <c>{first8} = memory.RunId.AsSpan(0, Math.Min(8, RunId.Length))</c>,
 /// <c>{emoji} ∈ { "👍", "👎", "•" }</c>, and the

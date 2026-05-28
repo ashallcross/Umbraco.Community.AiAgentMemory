@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Feedback;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+namespace Umbraco.Community.AiAgentMemory.Web.Api.Models;
 
 /// <summary>
 /// Read-only projection of editor feedback rows for one agent run. Returned by

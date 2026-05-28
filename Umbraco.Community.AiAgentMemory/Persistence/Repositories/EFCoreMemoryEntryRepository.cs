@@ -1,9 +1,9 @@
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
 using Umbraco.Cms.Core.Scoping;
 using Umbraco.Cms.Persistence.EFCore.Scoping;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
+namespace Umbraco.Community.AiAgentMemory.Persistence.Repositories;
 
 /// <summary>
 /// EF Core repository for <see cref="MemoryEntryEntity"/>. Composes on

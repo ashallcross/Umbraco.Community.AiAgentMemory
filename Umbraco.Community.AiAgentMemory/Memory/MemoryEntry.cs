@@ -1,6 +1,6 @@
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Feedback;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Memory;
+namespace Umbraco.Community.AiAgentMemory.Memory;
 
 /// <summary>
 /// A single past-run memory considered for injection into a future agent run.

@@ -1,6 +1,6 @@
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
+namespace Umbraco.Community.AiAgentMemory.Persistence.Repositories;
 
 /// <summary>
 /// Read/write surface over <see cref="MemoryEntryEntity"/>. Introduced at

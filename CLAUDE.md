@@ -1,13 +1,13 @@
 # Project Instructions for Claude Code
 
-Cogworks.UmbracoAI.AgentMemory — persistent memory + learning layer for Umbraco's AI agent stack.
+Umbraco.Community.AiAgentMemory — persistent memory + learning layer for Umbraco's AI agent stack.
 
 ## Two-Repo Development Split (Non-Negotiable)
 
 This project is developed across two repositories:
 
-- **Public repo** at `~/Documents/Cogworks.UmbracoAI.AgentMemory/` — package source, tests, TestSite, docs, ships to NuGet
-- **Private repo** at `~/Documents/Cogworks.UmbracoAI.AgentMemory-planning/` — BMAD planning artefacts, story specs, retrospectives, sprint status, deferred work, Claude skills
+- **Public repo** at `~/Documents/Umbraco.Community.AiAgentMemory/` — package source, tests, TestSite, docs, ships to NuGet
+- **Private repo** at `~/Documents/Umbraco.Community.AiAgentMemory-planning/` — BMAD planning artefacts, story specs, retrospectives, sprint status, deferred work, Claude skills
 
 The folders `_bmad-output/`, `_bmad/`, `.agents/`, and `.claude/` inside the public repo are symlinks pointing at the private repo. The public repo's `.gitignore` excludes those paths.
 
@@ -15,9 +15,9 @@ The folders `_bmad-output/`, `_bmad/`, `.agents/`, and `.claude/` inside the pub
 
 | What changed | Which repo to commit in |
 |---|---|
-| Files under `Cogworks.UmbracoAI.AgentMemory/`, `.TestSite/`, `.Tests/` | Public |
+| Files under `Umbraco.Community.AiAgentMemory/`, `.TestSite/`, `.Tests/` | Public |
 | `docs/`, README.md, LICENSE, NOTICE, csproj files, .gitignore | Public |
-| Anything under `_bmad-output/`, `_bmad/`, `.agents/`, `.claude/` (reached via symlink) | **Private** — cd to `~/Documents/Cogworks.UmbracoAI.AgentMemory-planning/` to commit |
+| Anything under `_bmad-output/`, `_bmad/`, `.agents/`, `.claude/` (reached via symlink) | **Private** — cd to `~/Documents/Umbraco.Community.AiAgentMemory-planning/` to commit |
 
 A typical story completion produces two separate commits across the two repos. This is correct and expected. Never combine them.
 
@@ -28,9 +28,9 @@ A typical story completion produces two separate commits across the two repos. T
 
 ## Other Rules
 
-- **Tests**: `dotnet test Cogworks.UmbracoAI.AgentMemory.slnx` — never bare `dotnet test` (multi-project repo; bare call fails with MSB1011)
-- **Frontend tests**: `npm test` from `Cogworks.UmbracoAI.AgentMemory/Client/`
-- **Frontend build before commit**: `npm run build` from `Cogworks.UmbracoAI.AgentMemory/Client/` so `wwwroot/App_Plugins/` is current
+- **Tests**: `dotnet test Umbraco.Community.AiAgentMemory.slnx` — never bare `dotnet test` (multi-project repo; bare call fails with MSB1011)
+- **Frontend tests**: `npm test` from `Umbraco.Community.AiAgentMemory/Client/`
+- **Frontend build before commit**: `npm run build` from `Umbraco.Community.AiAgentMemory/Client/` so `wwwroot/App_Plugins/` is current
 - **TestSite**: uses Cogworks Clean starter kit (Clean + Clean.Core 7.0.5) — both packages required, version-locked
 - **TestSite scaffolding**: always start from `dotnet new umbraco`, never hand-roll. Delete the template's nested `Directory.Packages.props` (it shadows the repo root CPM and causes silent version-pin drift). Lesson: Story 1.1 hand-roll caused boot crash; the re-scaffold-from-template fix is the canonical recipe (DRIFT-1.1-3 in `1-1-outcome.md`).
 - **TFM**: net10.0
@@ -62,7 +62,7 @@ The package adds plumbing on top of Umbraco.AI's runtime — never replaces it.
 
 ## Key planning docs
 
-In `~/Documents/Cogworks.UmbracoAI.AgentMemory-planning/_bmad-output/planning-artifacts/`:
+In `~/Documents/Umbraco.Community.AiAgentMemory-planning/_bmad-output/planning-artifacts/`:
 
 - `00-vision.md` — the thesis
 - `06-architecture-v1.md` — interface signatures, flow diagrams

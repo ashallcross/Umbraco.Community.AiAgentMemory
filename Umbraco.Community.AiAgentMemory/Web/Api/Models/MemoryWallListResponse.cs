@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Feedback;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+namespace Umbraco.Community.AiAgentMemory.Web.Api.Models;
 
 /// <summary>
 /// Story 4.9 — Read-only projection of every memory entry the package has

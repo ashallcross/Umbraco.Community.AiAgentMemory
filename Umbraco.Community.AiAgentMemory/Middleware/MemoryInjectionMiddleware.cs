@@ -1,11 +1,11 @@
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
-using Cogworks.UmbracoAI.AgentMemory.Memory;
+using Umbraco.Community.AiAgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Memory;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.AI.Core.RuntimeContext;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Middleware;
+namespace Umbraco.Community.AiAgentMemory.Middleware;
 
 /// <summary>
 /// Per-call wrapper produced by <see cref="MemoryInjectionChatMiddleware.Apply"/>.

@@ -1,10 +1,10 @@
-using Cogworks.UmbracoAI.AgentMemory.Persistence;
+using Umbraco.Community.AiAgentMemory.Persistence;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Events;
 using Umbraco.Cms.Core.Scoping;
 using Umbraco.Cms.Persistence.EFCore.Scoping;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests._TestUtilities;
+namespace Umbraco.Community.AiAgentMemory.Tests._TestUtilities;
 
 /// <summary>
 /// Test-only <see cref="IEFCoreScopeProvider{AgentMemoryDbContext}"/> that wraps

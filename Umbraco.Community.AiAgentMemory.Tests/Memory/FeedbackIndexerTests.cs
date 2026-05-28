@@ -1,9 +1,9 @@
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Memory;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
-using Cogworks.UmbracoAI.AgentMemory.Runs;
+using Umbraco.Community.AiAgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Memory;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence.Repositories;
+using Umbraco.Community.AiAgentMemory.Runs;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -16,7 +16,7 @@ using Umbraco.AI.Core.Profiles;
 using Umbraco.AI.Search.Core.VectorStore;
 using Umbraco.Cms.Core.HostedServices;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Memory;
+namespace Umbraco.Community.AiAgentMemory.Tests.Memory;
 
 /// <summary>
 /// Unit tests for <see cref="FeedbackIndexer"/>. Drives <see cref="IFeedbackIndexer.IndexAsync"/>

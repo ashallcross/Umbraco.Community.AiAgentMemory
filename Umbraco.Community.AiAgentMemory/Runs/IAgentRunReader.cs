@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Runs;
+namespace Umbraco.Community.AiAgentMemory.Runs;
 
 /// <summary>
 /// Read-only view over agent runs, synthesised from <see cref="Umbraco.AI.Core.AuditLog.AIAuditLog"/>

@@ -1,13 +1,13 @@
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
-using Cogworks.UmbracoAI.AgentMemory.Memory;
-using Cogworks.UmbracoAI.AgentMemory.Middleware;
+using Umbraco.Community.AiAgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Memory;
+using Umbraco.Community.AiAgentMemory.Middleware;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.AI.Core.RuntimeContext;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Middleware;
+namespace Umbraco.Community.AiAgentMemory.Tests.Middleware;
 
 /// <summary>
 /// Story 3.3 — MemoryInjectionMiddleware unit tests (AC8.1-AC8.12).

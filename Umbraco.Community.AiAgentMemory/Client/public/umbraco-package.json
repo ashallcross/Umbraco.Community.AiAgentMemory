@@ -1,11 +1,11 @@
 {
   "$schema": "../../umbraco-package-schema.json",
-  "name": "Cogworks.UmbracoAI.AgentMemory",
+  "name": "Umbraco.Community.AiAgentMemory",
   "version": "0.1.0",
   "extensions": [
     {
       "type": "bundle",
-      "alias": "Cogworks.UmbracoAI.AgentMemory.Bundle",
+      "alias": "Umbraco.Community.AiAgentMemory.Bundle",
       "name": "Cogworks AgentMemory Bundle",
       "js": "/App_Plugins/CogworksUmbracoAIAgentMemory/cogworks-umbracoai-agentmemory.js"
     }

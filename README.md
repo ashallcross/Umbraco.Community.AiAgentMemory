@@ -1,8 +1,8 @@
-# Cogworks.UmbracoAI.AgentMemory
+# Umbraco.Community.AiAgentMemory
 
 > Persistent memory and learning layer for Umbraco's AI agent stack — agents that get better every time they run.
 
-[![NuGet](https://img.shields.io/nuget/v/Cogworks.UmbracoAI.AgentMemory.svg)](https://www.nuget.org/packages/Cogworks.UmbracoAI.AgentMemory/)
+[![NuGet](https://img.shields.io/nuget/v/Umbraco.Community.AiAgentMemory.svg)](https://www.nuget.org/packages/Umbraco.Community.AiAgentMemory/)
 [![Umbraco](https://img.shields.io/badge/Umbraco-17-blue.svg)](https://umbraco.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -24,7 +24,7 @@ Built as middleware on Umbraco.AI's chat client pipeline. Composes with Umbraco.
 ## Install
 
 ```bash
-dotnet add package Cogworks.UmbracoAI.AgentMemory --prerelease
+dotnet add package Umbraco.Community.AiAgentMemory --prerelease
 ```
 
 Requires:
@@ -78,7 +78,7 @@ See [docs](docs/) for full details. High-level shape:
            │
            ▼
 ┌────────────────────────────────────────────┐
-│  Cogworks.UmbracoAI.AgentMemory            │
+│  Umbraco.Community.AiAgentMemory            │
 │  • IAgentRunStore (run history)            │
 │  • IAgentFeedbackService (👍/👎 + comment) │
 │  • IMemoryRetriever (vector search)        │
@@ -88,7 +88,7 @@ See [docs](docs/) for full details. High-level shape:
 ## Project structure
 
 ```
-Cogworks.UmbracoAI.AgentMemory/        # The package (ships to NuGet)
+Umbraco.Community.AiAgentMemory/        # The package (ships to NuGet)
 ├── Composing/                          # IComposer for DI registration
 ├── Configuration/                      # Bound options POCO
 ├── Persistence/                        # EF entities + migrations
@@ -99,24 +99,24 @@ Cogworks.UmbracoAI.AgentMemory/        # The package (ships to NuGet)
 ├── Web/Api/                            # Backoffice API endpoints
 └── Client/                             # Lit frontend (Vite + TypeScript)
 
-Cogworks.UmbracoAI.AgentMemory.TestSite/   # Local Umbraco host with Clean starter kit
-Cogworks.UmbracoAI.AgentMemory.Tests/      # NUnit unit tests
+Umbraco.Community.AiAgentMemory.TestSite/   # Local Umbraco host with Clean starter kit
+Umbraco.Community.AiAgentMemory.Tests/      # NUnit unit tests
 ```
 
 ## Development
 
 ```bash
 # Build everything
-dotnet build Cogworks.UmbracoAI.AgentMemory.slnx
+dotnet build Umbraco.Community.AiAgentMemory.slnx
 
 # Run tests (always specify .slnx — NEVER bare `dotnet test`)
-dotnet test Cogworks.UmbracoAI.AgentMemory.slnx
+dotnet test Umbraco.Community.AiAgentMemory.slnx
 
 # Run the TestSite (with Clean starter kit)
-dotnet run --project Cogworks.UmbracoAI.AgentMemory.TestSite
+dotnet run --project Umbraco.Community.AiAgentMemory.TestSite
 
 # Frontend (Lit + Vite)
-cd Cogworks.UmbracoAI.AgentMemory/Client
+cd Umbraco.Community.AiAgentMemory/Client
 npm install
 npm run watch    # rebuilds on changes
 npm run build    # production build to ../wwwroot/App_Plugins/CogworksUmbracoAIAgentMemory/
@@ -130,8 +130,8 @@ This is the **public** repo — package source, tests, TestSite, docs.
 Planning artifacts (BMAD docs, story specs, retrospectives) live in the **private** sibling repo:
 
 ```
-~/Documents/Cogworks.UmbracoAI.AgentMemory/             # public, this repo
-~/Documents/Cogworks.UmbracoAI.AgentMemory-planning/    # private, planning
+~/Documents/Umbraco.Community.AiAgentMemory/             # public, this repo
+~/Documents/Umbraco.Community.AiAgentMemory-planning/    # private, planning
 ```
 
 `_bmad-output/`, `_bmad/`, `.agents/`, `.claude/` are symlinks from the public repo into the private repo. The public `.gitignore` excludes those paths so planning never accidentally commits to the public repo.

@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Runs;
+namespace Umbraco.Community.AiAgentMemory.Runs;
 
 /// <summary>
 /// Aliased to upstream <c>AIAuditLogStatus</c> (six values; verified at runtime via

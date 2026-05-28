@@ -1,8 +1,8 @@
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Configuration;
 using Microsoft.Extensions.Options;
 using Umbraco.AI.Core.AuditLog;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Runs;
+namespace Umbraco.Community.AiAgentMemory.Runs;
 
 /// <summary>
 /// Default <see cref="IAgentRunReader"/> implementation. Composes on

@@ -1,4 +1,4 @@
-namespace Cogworks.UmbracoAI.AgentMemory.Feedback;
+namespace Umbraco.Community.AiAgentMemory.Feedback;
 
 /// <summary>
 /// Editor feedback recorded against one agent run.

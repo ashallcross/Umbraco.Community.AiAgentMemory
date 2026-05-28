@@ -7,8 +7,8 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageId>Cogworks.UmbracoAI.AgentMemory</PackageId>
-    <Product>Cogworks.UmbracoAI.AgentMemory</Product>
+    <PackageId>Umbraco.Community.AiAgentMemory</PackageId>
+    <Product>Umbraco.Community.AiAgentMemory</Product>
     <Title>Cogworks AgentMemory for Umbraco AI</Title>
     <Version>0.1.0-beta.1</Version>
     <Description>Persistent memory and learning layer for Umbraco's AI agent stack — agents that get better every time they run.</Description>
@@ -16,8 +16,8 @@
     <PackageTags>umbraco-marketplace;umbraco;ai;agents;memory;learning;automate;cogworks</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/cogworks/Cogworks.UmbracoAI.AgentMemory</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/cogworks/Cogworks.UmbracoAI.AgentMemory.git</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/cogworks/Umbraco.Community.AiAgentMemory</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/cogworks/Umbraco.Community.AiAgentMemory.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 

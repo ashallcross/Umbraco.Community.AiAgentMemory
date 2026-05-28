@@ -1,12 +1,12 @@
-using Cogworks.UmbracoAI.AgentMemory.Memory;
-using Cogworks.UmbracoAI.AgentMemory.Persistence;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Entities;
-using Cogworks.UmbracoAI.AgentMemory.Persistence.Repositories;
-using Cogworks.UmbracoAI.AgentMemory.Tests._TestUtilities;
+using Umbraco.Community.AiAgentMemory.Memory;
+using Umbraco.Community.AiAgentMemory.Persistence;
+using Umbraco.Community.AiAgentMemory.Persistence.Entities;
+using Umbraco.Community.AiAgentMemory.Persistence.Repositories;
+using Umbraco.Community.AiAgentMemory.Tests._TestUtilities;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Persistence;
+namespace Umbraco.Community.AiAgentMemory.Tests.Persistence;
 
 /// <summary>
 /// End-to-end persistence verification for <see cref="EFCoreMemoryEntryRepository"/>.

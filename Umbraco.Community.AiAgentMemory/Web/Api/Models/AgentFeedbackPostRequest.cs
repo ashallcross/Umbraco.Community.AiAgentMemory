@@ -1,6 +1,6 @@
-using Cogworks.UmbracoAI.AgentMemory.Feedback;
+using Umbraco.Community.AiAgentMemory.Feedback;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
+namespace Umbraco.Community.AiAgentMemory.Web.Api.Models;
 
 /// <summary>
 /// POST body for

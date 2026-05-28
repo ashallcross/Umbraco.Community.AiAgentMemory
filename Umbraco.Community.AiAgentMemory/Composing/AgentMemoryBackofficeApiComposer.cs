@@ -1,6 +1,6 @@
 using System.Reflection;
 using Asp.Versioning;
-using Cogworks.UmbracoAI.AgentMemory.Web.Api;
+using Umbraco.Community.AiAgentMemory.Web.Api;
 using Microsoft.AspNetCore.Mvc.ApiExplorer;
 using Microsoft.AspNetCore.Mvc.ApplicationParts;
 using Microsoft.AspNetCore.Mvc.Controllers;
@@ -14,7 +14,7 @@ using Umbraco.Cms.Api.Management.OpenApi;
 using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Composing;
+namespace Umbraco.Community.AiAgentMemory.Composing;
 
 /// <summary>
 /// Story 2.2 — Wires the package's Management-API controllers into Umbraco's

@@ -1,10 +1,10 @@
-using Cogworks.UmbracoAI.AgentMemory.Configuration;
+using Umbraco.Community.AiAgentMemory.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
-namespace Cogworks.UmbracoAI.AgentMemory.Tests.Configuration;
+namespace Umbraco.Community.AiAgentMemory.Tests.Configuration;
 
 /// <summary>
 /// AR3 contract pin for <see cref="AgentMemoryOptionsValidator"/>:
@@ -196,7 +196,7 @@ public class AgentMemoryOptionsValidatorTests
         var services = new ServiceCollection();
         services.AddOptions();
         services.Configure<AgentMemoryOptions>(
-            configuration.GetSection(Cogworks.UmbracoAI.AgentMemory.Constants.ConfigSection));
+            configuration.GetSection(Umbraco.Community.AiAgentMemory.Constants.ConfigSection));
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AgentMemoryOptions>, AgentMemoryOptionsValidator>());
 
