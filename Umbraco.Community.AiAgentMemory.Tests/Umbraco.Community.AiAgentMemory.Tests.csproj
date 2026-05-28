@@ -18,7 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Cogworks.UmbracoAI.AgentMemory\Cogworks.UmbracoAI.AgentMemory.csproj" />
+    <ProjectReference Include="..\Umbraco.Community.AiAgentMemory\Umbraco.Community.AiAgentMemory.csproj" />
   </ItemGroup>
 
   <ItemGroup>

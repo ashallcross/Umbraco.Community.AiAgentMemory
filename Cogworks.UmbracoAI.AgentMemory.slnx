@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="Cogworks.UmbracoAI.AgentMemory/Cogworks.UmbracoAI.AgentMemory.csproj" />
-  <Project Path="Cogworks.UmbracoAI.AgentMemory.TestSite/Cogworks.UmbracoAI.AgentMemory.TestSite.csproj" />
-  <Project Path="Cogworks.UmbracoAI.AgentMemory.Tests/Cogworks.UmbracoAI.AgentMemory.Tests.csproj" />
-</Solution>
