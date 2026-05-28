@@ -148,15 +148,10 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   private _existingFeedbackAbortController: AbortController | null = null;
   private _siblingsAbortController: AbortController | null = null;
 
-  // One-shot guard so post-load `_existingFeedback` settles don't overwrite
-  // mid-edit form state on subsequent renders. Story 4.5 AC10.b.
-  private _hasSeededFromExisting = false;
-
   // Promise of the current-user-id resolution. Captured at connect time so
-  // `_loadExistingFeedback` can await it before computing the seed —
-  // prevents the race where the feedback fetch lands first and
-  // `_findCurrentUserRow` returns undefined because `_currentUserId` hasn't
-  // settled yet. Story 4.5 AC10.b seed-correctness.
+  // `_loadExistingFeedback` can await it before computing render-time
+  // current-user-row matching (Submit-disable-on-no-change at line ~625
+  // depends on `_findCurrentUserRow` resolving consistently).
   private _currentUserIdReady: Promise<void> | null = null;
 
   override connectedCallback() {
@@ -172,38 +167,26 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     // growth still fits cleanly within the small frame.
     this.closest("uui-modal-sidebar")?.setAttribute("size", "small");
 
-    // Story 4.2 — DRIFT-4.1-12 closure. Fetch the run's agent output so the
-    // editor sees score / issues / suggestions before thumbing. Fire-and-forget
-    // promise; render reacts via @state. Graceful degradation on any failure
-    // (404, network error, parse failure) — the feedback form still works.
-    //
-    // Story 4.12 — these initial fetches use the legacy ThreadId-keyed URLs
-    // (selectedRunIdAtLaunch = null). When the siblings fetch resolves with
-    // > 1 entries, it will switch to selectedRunId-keyed refetches and stale
-    // legacy responses will be ignored via the per-fetch selectedRunId
-    // snapshot guard in `_loadRunDetail` / `_loadExistingFeedback`.
-    void this._loadRunDetail(null);
-
     // Story 4.5 Task 0h — resolve the current authenticated user GUID via
     // UMB_CURRENT_USER_CONTEXT so the widget can decide which feedback row
     // gets the Edit button (AC8.i) + drive the Submit-disable-on-no-change
-    // computation (AC10). Kicked off BEFORE the feedback fetch so the seed
-    // step inside `_loadExistingFeedback` can `await` it. The Promise is
-    // captured in `_currentUserIdReady` so the load awaits the same Promise
-    // even if it lands first.
+    // computation (AC10). Independent of run-detail/feedback fetches; runs
+    // in parallel with the siblings probe.
     this._currentUserIdReady = this._resolveCurrentUserId();
 
-    // Story 4.5 Q1 — parallel fetch for the editor's previous feedback rows
-    // on this run, so the modal re-open shows the editor's last submission
-    // + an Edit affordance for supersede. Story 4.5 AC8.
-    void this._loadExistingFeedback(null);
-
-    // Story 4.12 — kick off the siblings probe so the modal knows whether it
-    // is rendering a single-iteration flow (no picker) or a batch flow (>1
-    // siblings → picker renders + selectedRunId-keyed refetches replace the
-    // initial legacy fetches above). The siblings load is non-blocking; if
-    // it fails or returns < 2 entries, the legacy fetches' responses surface
-    // normally and the widget is byte-compatible with Story 4.5.
+    // Story 4.12 — siblings probe is the SINGLE entry point for run-detail
+    // and existing-feedback fetches. When it lands it decides the mode:
+    //   - length > 1 → picker mode → fire fetches keyed by selectedRunId
+    //     (first iteration in ASC order per LD#3a)
+    //   - length ≤ 1 OR unavailable → legacy mode → fire fetches keyed by
+    //     ThreadId (Story 4.5 byte-compat single-iteration flow)
+    //
+    // Eliminates AC3.b first-render flash that would otherwise occur if the
+    // legacy ThreadId fetches resolved before the siblings probe (they
+    // would render runs[0] briefly before the picker overwrote it). One
+    // extra round-trip of latency vs the previous parallel kickoff; siblings
+    // is a cheap projection from the same IAgentRunReader call the legacy
+    // detail fetch already makes, so cost is sub-100ms typical.
     void this._loadSiblings();
   }
 
@@ -427,7 +410,6 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
           return true;
         }
       }
-      this._hasSeededFromExisting = true;
       return true;
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -464,6 +446,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     const threadId = this.data?.runId ?? "";
     if (threadId.length === 0) {
       this._siblingsState = "unavailable";
+      this._kickOffDownstreamFetches(null);
       return;
     }
 
@@ -482,6 +465,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       }
       if (!response.ok) {
         this._siblingsState = "unavailable";
+        this._kickOffDownstreamFetches(null);
         return;
       }
       const body = (await response.json()) as unknown;
@@ -493,6 +477,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       // …) marks unavailable and falls through to the legacy single-iteration path.
       if (!Array.isArray(body)) {
         this._siblingsState = "unavailable";
+        this._kickOffDownstreamFetches(null);
         return;
       }
       const siblings = body as AgentRunSibling[];
@@ -504,27 +489,14 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       // identically (AC3.g).
       if (siblings.length > 1) {
         // Default-select FIRST iteration (oldest in ASC-sorted list) per
-        // LD#3a — natural sequential-walk-through entry point. Switching
-        // `_selectedRunId` invalidates the legacy in-flight responses via
-        // the per-fetch snapshot guard.
+        // LD#3a — natural sequential-walk-through entry point.
         const firstRunId = siblings[0].runId;
         this._selectedRunId = firstRunId;
-        // Reset the seed flag so the new feedback fetch (for this iteration)
-        // seeds the form correctly.
-        this._hasSeededFromExisting = false;
-        // Lifecycle guard — if the modal was closed mid-fetch (after the
-        // siblings response landed but before we issue the chained refetches),
-        // don't spawn new abort controllers + fetches against a detached
-        // element. `disconnectedCallback` aborted the siblings controller, but
-        // the per-fetch reassign here would otherwise create fresh
-        // controllers attached to a dead element.
-        if (!this.isConnected) {
-          return;
-        }
-        // Kick off refetches targeting the selected iteration. These abort
-        // the legacy controllers internally before issuing their own GETs.
-        void this._loadRunDetail(firstRunId);
-        void this._loadExistingFeedback(firstRunId);
+        this._kickOffDownstreamFetches(firstRunId);
+      } else {
+        // Legacy single-iteration flow (length ≤ 1) — keyed by ThreadId per
+        // Story 4.5 byte-compat. No picker; selectedRunId stays null.
+        this._kickOffDownstreamFetches(null);
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -534,7 +506,26 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
         return;
       }
       this._siblingsState = "unavailable";
+      this._kickOffDownstreamFetches(null);
     }
+  }
+
+  /**
+   * Story 4.12 — fires run-detail + existing-feedback fetches with the
+   * resolved key. Called by `_loadSiblings` after the probe settles so the
+   * fetches don't flash the legacy runs[0] response before picker mode is
+   * known (AC3.b). Lifecycle-guarded — bails if the element disconnected
+   * mid-probe.
+   *
+   * @param selectedRunIdAtLaunch  per-iteration RunId (picker mode) or
+   *                                `null` for legacy ThreadId-keyed mode
+   */
+  private _kickOffDownstreamFetches(selectedRunIdAtLaunch: string | null) {
+    if (!this.isConnected) {
+      return;
+    }
+    void this._loadRunDetail(selectedRunIdAtLaunch);
+    void this._loadExistingFeedback(selectedRunIdAtLaunch);
   }
 
   /**
@@ -593,19 +584,12 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     const prev: [
       string | null, AgentRunDetail | null, RunDetailState,
       AgentRunFeedbackEntry[] | null, ExistingFeedbackState,
-      boolean,
     ] = [
       this._selectedRunId, this._runDetail, this._runDetailState,
       this._existingFeedback, this._existingFeedbackState,
-      this._hasSeededFromExisting,
     ];
 
     this._selectedRunId = target.runId;
-    // Reset seed flag so the new iteration's existing-feedback fetch can
-    // re-seed _score/_comment from that iteration's row. Since we cleared
-    // _score/_comment above, `userHasTouchedForm` in _loadExistingFeedback's
-    // seed branch resolves false and the seed fires unconditionally.
-    this._hasSeededFromExisting = false;
 
     const [detailOk, feedbackOk] = await Promise.all([
       this._loadRunDetail(target.runId),
@@ -619,7 +603,6 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       [
         this._selectedRunId, this._runDetail, this._runDetailState,
         this._existingFeedback, this._existingFeedbackState,
-        this._hasSeededFromExisting,
       ] = prev;
     }
   }

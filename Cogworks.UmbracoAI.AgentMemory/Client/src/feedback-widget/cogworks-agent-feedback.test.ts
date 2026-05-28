@@ -159,7 +159,6 @@ async function makeElement(opts: { currentUserId?: string | null } = {}) {
   // OR "unavailable" — both end the loading phase.
   const internals = element as unknown as {
     _existingFeedbackState: string;
-    _hasSeededFromExisting: boolean;
   };
   await waitUntil(
     () =>
@@ -199,9 +198,14 @@ describe("cogworks-agent-feedback — agent output render", () => {
       expect(text).to.contain("the wild calling");
       expect(text).to.contain("Guideline #6");
       expect(text).to.contain("Keep direct outdoor language.");
-      expect(stub.calls[0].url).to.equal(
-        "https://example.test/umbraco/management/api/v1/cogworks-agent-memory/runs/run-123",
+      // Post-AC3.b fix: siblings probe fires first; run-detail fetch fires
+      // AFTER siblings settles (so the legacy runs[0] response can't flash
+      // before picker mode is known). Assert by URL match across all calls
+      // rather than positional index.
+      const runDetailCall = stub.calls.find((c) =>
+        c.url === "https://example.test/umbraco/management/api/v1/cogworks-agent-memory/runs/run-123",
       );
+      expect(runDetailCall, "run-detail fetch fired after siblings settled").to.not.be.undefined;
     } finally {
       stub.restore();
     }
@@ -991,7 +995,6 @@ describe("cogworks-agent-feedback — Story 4.12 picker", () => {
       const internals = element as unknown as {
         _selectedRunId: string | null;
         _runDetailState: string;
-        _hasSeededFromExisting: boolean;
       };
       await waitUntil(
         () => internals._selectedRunId === "rid-step-2"
