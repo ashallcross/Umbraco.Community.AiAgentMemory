@@ -186,8 +186,8 @@ public class AgentMemoryOptionsValidatorTests
 
         var inMemoryConfig = new Dictionary<string, string?>
         {
-            ["Cogworks:AgentMemory:MaxMemoryAgeDays"] = "0",
-            ["Cogworks:AgentMemory:TopKMemories"] = "99",
+            ["AiAgentMemory:MaxMemoryAgeDays"] = "0",
+            ["AiAgentMemory:TopKMemories"] = "99",
         };
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(inMemoryConfig)

@@ -2,7 +2,7 @@ namespace Umbraco.Community.AiAgentMemory.Configuration;
 
 /// <summary>
 /// Bound configuration for <see cref="Umbraco.Community.AiAgentMemory"/>.
-/// Maps to the <c>Cogworks:AgentMemory</c> section of <c>appsettings.json</c>
+/// Maps to the <c>AiAgentMemory</c> section of <c>appsettings.json</c>
 /// (sourced via <see cref="Constants.ConfigSection"/>).
 /// </summary>
 /// <remarks>
@@ -92,7 +92,7 @@ public sealed class AgentMemoryOptions
     /// (DRIFT-3.2-impl-2). Adopters using higher-quality embedding models
     /// (e.g. <c>text-embedding-3-large</c>, whose similarity band typically
     /// sits in <c>[0.5, 0.85]</c>) should override upward via
-    /// <c>Cogworks:AgentMemory:EligibilityThreshold</c> in
+    /// <c>AiAgentMemory:EligibilityThreshold</c> in
     /// <c>appsettings.json</c>.
     /// </summary>
     /// <remarks>

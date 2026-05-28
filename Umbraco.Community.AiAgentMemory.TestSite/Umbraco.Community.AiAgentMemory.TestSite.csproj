@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <!-- Disable compression. Umbraco backoffice files are pre-compressed by node and should not be re-handled by dotnet. -->
     <CompressionEnabled>false</CompressionEnabled>
-    <UserSecretsId>cogworks-agentmemory-testsite</UserSecretsId>
+    <UserSecretsId>aiagentmemory-testsite</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

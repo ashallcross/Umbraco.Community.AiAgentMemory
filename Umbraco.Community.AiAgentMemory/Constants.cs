@@ -6,9 +6,9 @@ namespace Umbraco.Community.AiAgentMemory;
 public static class Constants
 {
     /// <summary>
-    /// Configuration section root: <c>Cogworks:AgentMemory</c>.
+    /// Configuration section root: <c>AiAgentMemory</c>.
     /// </summary>
-    public const string ConfigSection = "Cogworks:AgentMemory";
+    public const string ConfigSection = "AiAgentMemory";
 
     /// <summary>
     /// Swagger document name + Management-API operation-grouping identifier
