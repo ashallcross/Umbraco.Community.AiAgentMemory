@@ -38,7 +38,6 @@ type AgentRunSibling = {
   threadId: string;
   runId: string;
   startedUtc: string;
-  isCurrent: boolean;
 };
 
 /**
@@ -407,36 +406,28 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       this._existingFeedback = body.existing;
       this._existingFeedbackState = "loaded";
 
-      // Story 4.5 AC10.b — one-shot seed of the form state from the current
-      // user's row (so re-opening the modal shows their last submission and
-      // Submit-disable-on-no-change kicks in correctly). Await the
-      // current-user-id resolution before computing the seed — prevents the
-      // race where the feedback fetch lands first and `_findCurrentUserRow`
-      // returns undefined because `_currentUserId` hasn't settled yet.
+      // DRIFT-4.12-CR-3 (Adam UX 2026-05-28) — DO NOT auto-seed `_score` /
+      // `_comment` from the existing-feedback row. The Edit button on the
+      // current user's prior row is the explicit unlock for supersede; until
+      // clicked, the form stays empty (no thumb selected → textarea hidden
+      // by the `scoreSelected` render guard). This makes the Previous-feedback
+      // block a true read-only summary AND gives the Edit button a visible
+      // job (auto-seeding made Edit a no-op because the form was already
+      // pre-filled before the editor could click it). Submit-disable-on-
+      // no-change (line ~625-640) still works because `seededScore` /
+      // `seededComment` are computed at render time from `_existingFeedback`,
+      // not from `_score` / `_comment`. The seed lives in `_onEditClick`.
       //
-      // P13: AC10.b "subsequent settles MUST NOT clobber user input" — also
-      // skip the seed if the editor already touched the form during any
-      // await window above (toggled a score or typed in the textarea). The
-      // pre-seed user input is the explicit intent signal; honour it.
-      if (!this._hasSeededFromExisting) {
-        if (this._currentUserIdReady !== null) {
-          await this._currentUserIdReady;
-          if (controller.signal.aborted) {
-            return true;
-          }
+      // We still wait for `_currentUserIdReady` so `_findCurrentUserRow` in
+      // the render path resolves consistently (used to decide whether to
+      // show the Edit button against a row).
+      if (this._currentUserIdReady !== null) {
+        await this._currentUserIdReady;
+        if (controller.signal.aborted) {
+          return true;
         }
-        const userHasTouchedForm = this._score !== null || this._comment !== "";
-        if (!userHasTouchedForm) {
-          const myRow = this._findCurrentUserRow(body.existing);
-          if (myRow !== undefined) {
-            this._score = myRow.score === "Neutral"
-              ? null
-              : (myRow.score as ScoreString);
-            this._comment = myRow.comment ?? "";
-          }
-        }
-        this._hasSeededFromExisting = true;
       }
+      this._hasSeededFromExisting = true;
       return true;
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -521,6 +512,15 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
         // Reset the seed flag so the new feedback fetch (for this iteration)
         // seeds the form correctly.
         this._hasSeededFromExisting = false;
+        // Lifecycle guard — if the modal was closed mid-fetch (after the
+        // siblings response landed but before we issue the chained refetches),
+        // don't spawn new abort controllers + fetches against a detached
+        // element. `disconnectedCallback` aborted the siblings controller, but
+        // the per-fetch reassign here would otherwise create fresh
+        // controllers attached to a dead element.
+        if (!this.isConnected) {
+          return;
+        }
         // Kick off refetches targeting the selected iteration. These abort
         // the legacy controllers internally before issuing their own GETs.
         void this._loadRunDetail(firstRunId);
@@ -561,22 +561,51 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     const target = this._siblings[newIndex];
     if (target.runId === this._selectedRunId) return;
 
+    // DRIFT-4.12-CR-2 (Adam UX reversal 2026-05-28) — each picker iteration
+    // is a distinct page, NOT a peek. Clear all form state on every
+    // navigation so the new iteration renders either (a) empty form +
+    // thumb-fresh OR (b) seeded from that iteration's OWN existing feedback
+    // row via _loadExistingFeedback's seed branch. This reverts the P22
+    // preserve-draft contract (D3 option b ratified 2026-05-27) in favour of
+    // option a (clear on nav) per Adam's live-backoffice finding that
+    // preserved drafts read as "iter-1's feedback rendering against iter-2"
+    // and defeats the per-iteration teaching flow.
+    //
+    // Cleared:
+    //  - `_state` → "idle" (drops sticky error/success banners — DRIFT-CR-1)
+    //  - `_errorMessage` → "" (paired with state reset)
+    //  - `_score` → null  (form starts fresh)
+    //  - `_comment` → ""  (form starts fresh)
+    //
+    // Trade-off accepted: typing a draft on iter-N then clicking arrow
+    // loses the draft without warning. A future v0.2 confirm-modal could
+    // soften this (see deferred-work.md).
+    this._state = "idle";
+    this._errorMessage = "";
+    this._score = null;
+    this._comment = "";
+
     // Snapshot fields needed for AC4.e rollback. Tuple over object literal to
-    // keep the compiled-bundle footprint tight.
+    // keep the compiled-bundle footprint tight. The form-state fields above
+    // are not in the snapshot — they were just cleared deliberately as the
+    // intent of this handler; reverting to whatever they were before would
+    // re-introduce the cross-iteration leakage we just escaped.
     const prev: [
       string | null, AgentRunDetail | null, RunDetailState,
       AgentRunFeedbackEntry[] | null, ExistingFeedbackState,
-      ScoreString | null, string, boolean,
+      boolean,
     ] = [
       this._selectedRunId, this._runDetail, this._runDetailState,
       this._existingFeedback, this._existingFeedbackState,
-      this._score, this._comment, this._hasSeededFromExisting,
+      this._hasSeededFromExisting,
     ];
 
     this._selectedRunId = target.runId;
+    // Reset seed flag so the new iteration's existing-feedback fetch can
+    // re-seed _score/_comment from that iteration's row. Since we cleared
+    // _score/_comment above, `userHasTouchedForm` in _loadExistingFeedback's
+    // seed branch resolves false and the seed fires unconditionally.
     this._hasSeededFromExisting = false;
-    this._score = null;
-    this._comment = "";
 
     const [detailOk, feedbackOk] = await Promise.all([
       this._loadRunDetail(target.runId),
@@ -590,7 +619,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       [
         this._selectedRunId, this._runDetail, this._runDetailState,
         this._existingFeedback, this._existingFeedbackState,
-        this._score, this._comment, this._hasSeededFromExisting,
+        this._hasSeededFromExisting,
       ] = prev;
     }
   }
@@ -823,17 +852,26 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
   }
 
   /**
-   * Story 4.5 AC8.j — Edit-button click pre-populates the form from the
-   * existing-feedback row + acts as the explicit intent signal for
-   * supersede. Submit-disable-on-no-change (AC10) keeps Submit disabled
-   * until the editor actually mutates score or comment from the seeded
-   * values — clicking Edit alone does NOT enable Submit.
+   * Story 4.5 AC8.j + DRIFT-4.12-CR-3 (Adam UX 2026-05-28) — Edit-button
+   * click pre-populates the form from the existing-feedback row + acts as
+   * the explicit intent signal for supersede. The auto-seed in
+   * `_loadExistingFeedback` was removed (form stays empty until Edit is
+   * clicked) so this handler is the ONLY path that populates the form for
+   * an existing-feedback row.
+   *
+   * Submit-disable-on-no-change (AC10) keeps Submit disabled until the
+   * editor actually mutates score or comment from the seeded values —
+   * clicking Edit alone does NOT enable Submit.
+   *
+   * After seeding, scrolls the textarea into view + focuses it so the
+   * editor's next action is "modify your prior feedback" (anchor-to-edit-
+   * box UX per Adam 2026-05-28).
    *
    * Neutral score is display-only in the existing-feedback block (Story 2.3
    * widget only emits ThumbsUp / ThumbsDown); Neutral rows do NOT carry an
    * Edit button per AC8.i so this handler never receives one.
    */
-  private _onEditClick(row: AgentRunFeedbackEntry) {
+  private async _onEditClick(row: AgentRunFeedbackEntry) {
     this._score = row.score === "Neutral"
       ? null
       : (row.score as ScoreString);
@@ -842,6 +880,20 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     if (this._state === "error") {
       this._state = "idle";
       this._errorMessage = "";
+    }
+
+    // Wait for the render pass that surfaces the textarea (it's conditional
+    // on `scoreSelected`, which just flipped true via _score = ThumbsUp/Down
+    // above). Then scroll the textarea into view + focus it so the editor's
+    // cursor is in place for supersede edits.
+    await this.updateComplete;
+    const textarea = this.shadowRoot?.querySelector("uui-textarea");
+    if (textarea !== null && textarea !== undefined) {
+      // Smooth-scroll + nearest block alignment keeps existing-feedback row
+      // visible above; focus-shift moves caret into textarea (UUI textarea
+      // forwards focus to its inner native element).
+      textarea.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      (textarea as HTMLElement).focus();
     }
   }
 
@@ -860,6 +912,18 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
    * strings; no user-controlled content is rendered via this template.
    */
   private _renderPicker() {
+    // P1 — empty-batch error state (AC3.g + AC5 frontend test 8 + § Failure
+    // edges). When the workflow iterated over zero items, the siblings list
+    // resolves loaded-but-empty. Picker is hidden; an explicit notice tells
+    // the editor why (otherwise the modal would look like a normal
+    // single-iteration view, which is misleading for a batch workflow).
+    if (this._siblingsState === "loaded" && this._siblings.length === 0) {
+      return html`
+        <p class="picker-empty-batch" role="status">
+          No iterations available — workflow may have iterated over zero items.
+        </p>
+      `;
+    }
     // Picker only renders once the siblings fetch has settled successfully
     // AND there is more than one iteration. Hides during the initial load
     // phase + on unavailable so we don't flash a stub picker during the
@@ -870,9 +934,19 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     const selectedIndex = this._siblings.findIndex(
       (s) => s.runId === this._selectedRunId,
     );
-    // Defensive — if the selected RunId isn't in the list (race between
-    // siblings reload and selectedRunId rewrite), default to index 0 so the
-    // picker still renders a sensible position.
+    // P15 — if the selected RunId is orphan (rollback restored a stale value;
+    // shouldn't happen in practice since siblings is one-shot, but defensive),
+    // emit a console.warn so the corruption is visible to adopter devtools
+    // rather than silently masked by the idx=0 fallback. POST'd feedback uses
+    // the cached _selectedRunId so an orphan would surface as a 404 on
+    // submit — better to know.
+    if (selectedIndex < 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[cogworks-agent-feedback] picker: _selectedRunId is not present in _siblings; falling back to index 0. Submit will POST the orphan RunId.",
+        { selectedRunId: this._selectedRunId, siblingCount: this._siblings.length },
+      );
+    }
     const idx = selectedIndex >= 0 ? selectedIndex : 0;
     const total = this._siblings.length;
     const sibling = this._siblings[idx];
@@ -880,18 +954,14 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     const prevDisabled = idx === 0 || isSubmitting;
     const nextDisabled = idx === total - 1 || isSubmitting;
 
-    // Format the iteration's StartedUtc in the user's local timezone. Falls
-    // back to the raw ISO string if Intl parsing throws (malformed timestamp
-    // from a misconfigured server).
-    let timestamp = sibling.startedUtc;
-    try {
-      const date = new Date(sibling.startedUtc);
-      if (!Number.isNaN(date.getTime())) {
-        timestamp = date.toLocaleTimeString();
-      }
-    } catch {
-      // Keep ISO fallback.
-    }
+    // P14 — `new Date()` doesn't throw on invalid input; it returns Invalid
+    // Date which `Number.isNaN(date.getTime())` already guards. The previous
+    // try/catch was dead code. `toLocaleTimeString` doesn't throw under
+    // normal conditions either.
+    const date = new Date(sibling.startedUtc);
+    const timestamp = Number.isNaN(date.getTime())
+      ? sibling.startedUtc
+      : date.toLocaleTimeString();
 
     return html`
       <div class="picker-row" role="group" aria-label="Iteration picker">
@@ -1104,6 +1174,13 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       return;
     }
 
+    // P16 — capture _selectedRunId at submit start. The picker arrows are
+    // disabled while submit is in flight, but defence-in-depth against
+    // programmatic mutation between submit-start and POST-body construction.
+    const submitSelectedRunId = this._selectedRunId;
+    const submitScore = this._score;
+    const submitComment = this._comment;
+
     // Cancel any prior in-flight submission (resubmit / retry path).
     this._abortController?.abort();
     this._abortController = new AbortController();
@@ -1118,17 +1195,14 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
           method: "POST",
           body: {
             runId,
-            score: this._score,
-            comment: this._comment.length > 0 ? this._comment : null,
+            score: submitScore,
+            comment: submitComment.length > 0 ? submitComment : null,
             // Story 4.12 — picker submissions include selectedRunId so the
             // controller records feedback under the per-iteration RunId
             // (creating distinct supersede keys per iteration). Omitted for
             // non-picker submissions (single-iteration flows) so the legacy
-            // ThreadId-keyed path is preserved byte-compatibly. The "Submit"
-            // button is also disabled while picker arrows are mid-flight, so
-            // selectedRunId here always reflects the iteration the editor
-            // was looking at when they clicked Submit.
-            selectedRunId: this._selectedRunId,
+            // ThreadId-keyed path is preserved byte-compatibly.
+            selectedRunId: submitSelectedRunId,
           },
           signal: this._abortController.signal,
         },
@@ -1419,6 +1493,12 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
       color: var(--uui-color-text-alt);
       font-size: var(--uui-type-small-size, 0.875rem);
       font-variant-numeric: tabular-nums;
+    }
+
+    .picker-empty-batch {
+      margin: 0 0 var(--uui-size-space-3) 0;
+      color: var(--uui-color-text-alt);
+      font-style: italic;
     }
   `;
 }

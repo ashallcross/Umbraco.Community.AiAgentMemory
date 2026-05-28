@@ -383,6 +383,13 @@ public class AgentFeedbackControllerTests
         // — otherwise we'd index against the legacy ThreadId row in addition
         // to (or instead of) the selected iteration.
         _indexer.DidNotReceive().EnqueueIndex("thread-A", Arg.Any<Guid>());
+
+        // P19 — pin total call count so a future regression that fires
+        // EnqueueIndex twice (or under unexpected args) is caught.
+        Assert.That(
+            _indexer.ReceivedCalls().Count(c => c.GetMethodInfo().Name == "EnqueueIndex"),
+            Is.EqualTo(1),
+            "EnqueueIndex must fire exactly once per picker submission.");
     }
 
     [Test]
@@ -418,10 +425,15 @@ public class AgentFeedbackControllerTests
         // is null, the controller records feedback under the ThreadId-shaped
         // RunId field exactly as before. Tests must verify the LEGACY path
         // didn't accidentally switch to selectedRunId-keyed.
+        //
+        // P17 — explicit `SelectedRunId: null` rather than relying on the
+        // record default; pins the legacy-mode contract against future default-
+        // value changes.
         var request = new AgentFeedbackPostRequest(
             RunId: "thread-A",
             Score: FeedbackScore.ThumbsUp,
-            Comment: "legacy submission");
+            Comment: "legacy submission",
+            SelectedRunId: null);
 
         var result = await _controller.PostAsync(request, CancellationToken.None);
 
@@ -457,5 +469,76 @@ public class AgentFeedbackControllerTests
 
         await _feedbackService.DidNotReceiveWithAnyArgs().RecordFeedbackAsync(
             default!, default, default, default, default, default);
+    }
+
+    [TestCase("   ")]
+    [TestCase("\t")]
+    [TestCase("")]
+    public async Task PostAsync_SelectedRunIdWhitespaceOnly_Returns400_NoServiceCall(string whitespaceValue)
+    {
+        // P12 — symmetric with the RunId whitespace check. Silently treating
+        // whitespace-only as "legacy mode" would mask client contract drift;
+        // surface explicitly as 400.
+        var request = new AgentFeedbackPostRequest(
+            RunId: "thread-A",
+            Score: FeedbackScore.ThumbsUp,
+            Comment: null,
+            SelectedRunId: whitespaceValue);
+
+        var result = await _controller.PostAsync(request, CancellationToken.None);
+
+        var objectResult = result as ObjectResult;
+        Assert.That(objectResult, Is.Not.Null);
+        Assert.That(objectResult!.StatusCode, Is.EqualTo(StatusCodes.Status400BadRequest));
+        var problem = (ProblemDetails)objectResult.Value!;
+        Assert.That(problem.Detail, Does.Contain("selectedRunId"));
+
+        await _feedbackService.DidNotReceiveWithAnyArgs().RecordFeedbackAsync(
+            default!, default, default, default, default, default);
+        _indexer.DidNotReceiveWithAnyArgs().EnqueueIndex(default!, default);
+    }
+
+    [Test]
+    public async Task PostAsync_SelectedRunIdMatchesMultipleSiblings_PicksFirst_LogsWarning()
+    {
+        // P3 — single-row-per-RunId contract is documented but not enforced
+        // by the audit-log writer; a future tool-call follow-up retry that
+        // re-uses a RunId would otherwise crash with SingleOrDefault throwing.
+        // Verify the FirstOrDefault + warn-log fallback.
+        var agentId = Guid.NewGuid();
+        var siblings = new[]
+        {
+            MakeRunRecord(agentId, "rid-step-2"),  // duplicate
+            MakeRunRecord(agentId, "rid-step-2"),  // duplicate
+            MakeRunRecord(agentId, "rid-step-1"),
+        };
+        _runReader.GetRunsForThreadAsync("thread-A", Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(siblings));
+
+        var request = new AgentFeedbackPostRequest(
+            RunId: "thread-A",
+            Score: FeedbackScore.ThumbsUp,
+            Comment: "first-match",
+            SelectedRunId: "rid-step-2");
+
+        var result = await _controller.PostAsync(request, CancellationToken.None);
+
+        Assert.That(result, Is.InstanceOf<OkResult>(),
+            "Picker submission with duplicate RunIds succeeds against the first match.");
+
+        await _feedbackService.Received(1).RecordFeedbackAsync(
+            "rid-step-2",
+            agentId,
+            FeedbackScore.ThumbsUp,
+            "first-match",
+            _resolvedUserKey,
+            Arg.Any<CancellationToken>());
+
+        _logger.Received().Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Is<object>(o => o.ToString()!.Contains("single-row-per-RunId contract violated")),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
     }
 }

@@ -191,8 +191,16 @@ internal sealed class FeedbackIndexer : IFeedbackIndexer
         else
         {
             // Fallback: legacy ThreadId-keyed rows OR pre-Fork-(i) audit rows
-            // without populated Metadata. v0.1 picks runs[0] (most-recent per
-            // StartedUtc DESC); multi-record join is a v0.2 candidate.
+            // without populated Metadata. The fallback is only safe when
+            // runId resolves to a ThreadId-grouped result whose runs[0] is the
+            // intended target (legacy single-iteration path). When the caller
+            // supplied a per-iteration RunId (Story 4.12 picker) and the
+            // Metadata-keyed GetRunAsync probe missed, runs[0] would be the
+            // most-recent SIBLING iteration — a different iteration's
+            // prompt/response would index under the supplied RunId, mis-
+            // tagging the memory entry. To prevent that: when fallback rows
+            // exist but none has RunId == supplied runId, skip with Warning
+            // rather than embed wrong-iteration content.
             IReadOnlyList<AgentRunRecord> runs;
             try
             {
@@ -216,7 +224,24 @@ internal sealed class FeedbackIndexer : IFeedbackIndexer
                     runId, agentId);
                 return;
             }
-            run = runs[0];
+            // Legacy ThreadId-keyed path: any row in the group shares the
+            // ThreadId == supplied runId convention. Picker path that fell
+            // through GetRunAsync without resolving to a row would also land
+            // here, but the supplied runId would NOT match any row's RunId
+            // in the group (because rows under one ThreadId have distinct
+            // per-iteration RunIds). Detect that case and skip rather than
+            // mis-tag.
+            var matchingByRunId = runs.FirstOrDefault(r =>
+                string.Equals(r.RunId, runId, StringComparison.Ordinal));
+            if (matchingByRunId is null
+                && runs.Any(r => !string.Equals(r.ThreadId, runId, StringComparison.Ordinal)))
+            {
+                _logger.LogWarning(
+                    "FeedbackIndexer — supplied runId {RunId} did not resolve via GetRunAsync AND no fallback row in the ThreadId group matches it by RunId; rows in the group also don't share runId as ThreadId. Skipping to avoid mis-tagging wrong-iteration content as feedback for {RunId}.",
+                    runId, runId);
+                return;
+            }
+            run = matchingByRunId ?? runs[0];
         }
 
         // Read feedback; if empty → Debug + return (defensive guard against NFR-R3 swallow).

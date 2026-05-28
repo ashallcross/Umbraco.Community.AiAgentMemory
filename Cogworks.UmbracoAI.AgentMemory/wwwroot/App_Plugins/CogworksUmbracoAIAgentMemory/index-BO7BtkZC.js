@@ -1,13 +1,13 @@
 import { css as f, state as c, customElement as y, nothing as u, html as o } from "@umbraco-cms/backoffice/external/lit";
 import { UmbModalBaseElement as k } from "@umbraco-cms/backoffice/modal";
-import { UMB_AUTH_CONTEXT as m } from "@umbraco-cms/backoffice/auth";
+import { UMB_AUTH_CONTEXT as b } from "@umbraco-cms/backoffice/auth";
 import { UMB_CURRENT_USER_CONTEXT as v } from "@umbraco-cms/backoffice/current-user";
 class p extends Error {
   constructor() {
     super(...arguments), this.name = "AuthContextUnavailableError";
   }
 }
-async function b(e, t, s) {
+async function m(e, t, s) {
   const a = await e();
   if (!a)
     throw new p("Auth context unavailable");
@@ -20,15 +20,15 @@ async function b(e, t, s) {
   }
   if (!r || r.trim() === "")
     throw new p("Token acquisition returned empty");
-  const d = s.body !== void 0, h = {
+  const d = s.body !== void 0, g = {
     Accept: "application/json",
     Authorization: `Bearer ${r}`,
     ...d ? { "Content-Type": "application/json" } : {}
-  }, g = { ...s.headers ?? {} };
-  delete g.Authorization, delete g.authorization;
+  }, h = { ...s.headers ?? {} };
+  delete h.Authorization, delete h.authorization;
   const _ = {
-    ...h,
-    ...g
+    ...g,
+    ...h
   };
   return fetch(`${i.base}${t}`, {
     method: s.method ?? "GET",
@@ -57,39 +57,37 @@ let n = class extends k {
         this._state = "error", this._errorMessage = "Couldn't load this run's details. Refresh the page and try again.";
         return;
       }
+      const t = this._selectedRunId, s = this._score, a = this._comment;
       this._abortController?.abort(), this._abortController = new AbortController(), this._state = "submitting", this._errorMessage = "";
       try {
-        const t = await b(
-          () => this.getContext(m),
+        const i = await m(
+          () => this.getContext(b),
           "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
           {
             method: "POST",
             body: {
               runId: e,
-              score: this._score,
-              comment: this._comment.length > 0 ? this._comment : null,
+              score: s,
+              comment: a.length > 0 ? a : null,
               // Story 4.12 — picker submissions include selectedRunId so the
               // controller records feedback under the per-iteration RunId
               // (creating distinct supersede keys per iteration). Omitted for
               // non-picker submissions (single-iteration flows) so the legacy
-              // ThreadId-keyed path is preserved byte-compatibly. The "Submit"
-              // button is also disabled while picker arrows are mid-flight, so
-              // selectedRunId here always reflects the iteration the editor
-              // was looking at when they clicked Submit.
-              selectedRunId: this._selectedRunId
+              // ThreadId-keyed path is preserved byte-compatibly.
+              selectedRunId: t
             },
             signal: this._abortController.signal
           }
         );
-        if (t.ok) {
+        if (i.ok) {
           this._state = "success";
           return;
         }
-        await this._handleHttpError(t);
-      } catch (t) {
-        if (t instanceof DOMException && t.name === "AbortError")
+        await this._handleHttpError(i);
+      } catch (i) {
+        if (i instanceof DOMException && i.name === "AbortError")
           return;
-        if (t instanceof p) {
+        if (i instanceof p) {
           this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
           return;
         }
@@ -120,8 +118,8 @@ let n = class extends k {
     this._runDetailAbortController = s, this._runDetailState = "loading";
     const a = e !== null ? `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(t)}?selectedRunId=${encodeURIComponent(e)}` : `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(t)}`;
     try {
-      const i = await b(
-        () => this.getContext(m),
+      const i = await m(
+        () => this.getContext(b),
         a,
         { signal: s.signal }
       );
@@ -144,8 +142,8 @@ let n = class extends k {
     this._existingFeedbackAbortController = s, this._existingFeedbackState = "loading";
     const a = e ?? t;
     try {
-      const i = await b(
-        () => this.getContext(m),
+      const i = await m(
+        () => this.getContext(b),
         `/umbraco/management/api/v1/cogworks-agent-memory/feedback/${encodeURIComponent(a)}`,
         { signal: s.signal }
       );
@@ -154,20 +152,7 @@ let n = class extends k {
       if (!i.ok)
         return this._existingFeedbackState = "unavailable", !1;
       const r = await i.json();
-      if (s.signal.aborted || this._selectedRunId !== e)
-        return !0;
-      if (!Array.isArray(r.existing))
-        return this._existingFeedbackState = "unavailable", !1;
-      if (this._existingFeedback = r.existing, this._existingFeedbackState = "loaded", !this._hasSeededFromExisting) {
-        if (this._currentUserIdReady !== null && (await this._currentUserIdReady, s.signal.aborted))
-          return !0;
-        if (!(this._score !== null || this._comment !== "")) {
-          const h = this._findCurrentUserRow(r.existing);
-          h !== void 0 && (this._score = h.score === "Neutral" ? null : h.score, this._comment = h.comment ?? "");
-        }
-        this._hasSeededFromExisting = !0;
-      }
-      return !0;
+      return s.signal.aborted || this._selectedRunId !== e ? !0 : Array.isArray(r.existing) ? (this._existingFeedback = r.existing, this._existingFeedbackState = "loaded", this._currentUserIdReady !== null && (await this._currentUserIdReady, s.signal.aborted) || (this._hasSeededFromExisting = !0), !0) : (this._existingFeedbackState = "unavailable", !1);
     } catch (i) {
       return i instanceof DOMException && i.name === "AbortError" || s.signal.aborted ? !0 : (this._existingFeedbackState = "unavailable", !1);
     }
@@ -199,8 +184,8 @@ let n = class extends k {
     const t = new AbortController();
     this._siblingsAbortController = t;
     try {
-      const s = await b(
-        () => this.getContext(m),
+      const s = await m(
+        () => this.getContext(b),
         `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(e)}/siblings`,
         { signal: t.signal }
       );
@@ -220,7 +205,9 @@ let n = class extends k {
       const i = a;
       if (this._siblings = i, this._siblingsState = "loaded", i.length > 1) {
         const r = i[0].runId;
-        this._selectedRunId = r, this._hasSeededFromExisting = !1, this._loadRunDetail(r), this._loadExistingFeedback(r);
+        if (this._selectedRunId = r, this._hasSeededFromExisting = !1, !this.isConnected)
+          return;
+        this._loadRunDetail(r), this._loadExistingFeedback(r);
       }
     } catch (s) {
       if (s instanceof DOMException && s.name === "AbortError" || t.signal.aborted)
@@ -250,17 +237,16 @@ let n = class extends k {
     if (this._state === "submitting" || e < 0 || e >= this._siblings.length) return;
     const t = this._siblings[e];
     if (t.runId === this._selectedRunId) return;
+    this._state = "idle", this._errorMessage = "", this._score = null, this._comment = "";
     const s = [
       this._selectedRunId,
       this._runDetail,
       this._runDetailState,
       this._existingFeedback,
       this._existingFeedbackState,
-      this._score,
-      this._comment,
       this._hasSeededFromExisting
     ];
-    this._selectedRunId = t.runId, this._hasSeededFromExisting = !1, this._score = null, this._comment = "";
+    this._selectedRunId = t.runId, this._hasSeededFromExisting = !1;
     const [a, i] = await Promise.all([
       this._loadRunDetail(t.runId),
       this._loadExistingFeedback(t.runId)
@@ -271,8 +257,6 @@ let n = class extends k {
       this._runDetailState,
       this._existingFeedback,
       this._existingFeedbackState,
-      this._score,
-      this._comment,
       this._hasSeededFromExisting
     ] = s);
   }
@@ -431,18 +415,29 @@ let n = class extends k {
     `;
   }
   /**
-   * Story 4.5 AC8.j — Edit-button click pre-populates the form from the
-   * existing-feedback row + acts as the explicit intent signal for
-   * supersede. Submit-disable-on-no-change (AC10) keeps Submit disabled
-   * until the editor actually mutates score or comment from the seeded
-   * values — clicking Edit alone does NOT enable Submit.
+   * Story 4.5 AC8.j + DRIFT-4.12-CR-3 (Adam UX 2026-05-28) — Edit-button
+   * click pre-populates the form from the existing-feedback row + acts as
+   * the explicit intent signal for supersede. The auto-seed in
+   * `_loadExistingFeedback` was removed (form stays empty until Edit is
+   * clicked) so this handler is the ONLY path that populates the form for
+   * an existing-feedback row.
+   *
+   * Submit-disable-on-no-change (AC10) keeps Submit disabled until the
+   * editor actually mutates score or comment from the seeded values —
+   * clicking Edit alone does NOT enable Submit.
+   *
+   * After seeding, scrolls the textarea into view + focuses it so the
+   * editor's next action is "modify your prior feedback" (anchor-to-edit-
+   * box UX per Adam 2026-05-28).
    *
    * Neutral score is display-only in the existing-feedback block (Story 2.3
    * widget only emits ThumbsUp / ThumbsDown); Neutral rows do NOT carry an
    * Edit button per AC8.i so this handler never receives one.
    */
-  _onEditClick(e) {
-    this._score = e.score === "Neutral" ? null : e.score, this._comment = e.comment ?? "", this._state === "error" && (this._state = "idle", this._errorMessage = "");
+  async _onEditClick(e) {
+    this._score = e.score === "Neutral" ? null : e.score, this._comment = e.comment ?? "", this._state === "error" && (this._state = "idle", this._errorMessage = ""), await this.updateComplete;
+    const t = this.shadowRoot?.querySelector("uui-textarea");
+    t != null && (t.scrollIntoView({ behavior: "smooth", block: "nearest" }), t.focus());
   }
   /**
    * Story 4.12 — picker row above the agent-output content. Renders only when
@@ -459,17 +454,22 @@ let n = class extends k {
    * strings; no user-controlled content is rendered via this template.
    */
   _renderPicker() {
+    if (this._siblingsState === "loaded" && this._siblings.length === 0)
+      return o`
+        <p class="picker-empty-batch" role="status">
+          No iterations available — workflow may have iterated over zero items.
+        </p>
+      `;
     if (this._siblingsState !== "loaded" || this._siblings.length <= 1)
       return u;
     const e = this._siblings.findIndex(
-      (g) => g.runId === this._selectedRunId
-    ), t = e >= 0 ? e : 0, s = this._siblings.length, a = this._siblings[t], i = this._state === "submitting", r = t === 0 || i, d = t === s - 1 || i;
-    let h = a.startedUtc;
-    try {
-      const g = new Date(a.startedUtc);
-      Number.isNaN(g.getTime()) || (h = g.toLocaleTimeString());
-    } catch {
-    }
+      (_) => _.runId === this._selectedRunId
+    );
+    e < 0 && console.warn(
+      "[cogworks-agent-feedback] picker: _selectedRunId is not present in _siblings; falling back to index 0. Submit will POST the orphan RunId.",
+      { selectedRunId: this._selectedRunId, siblingCount: this._siblings.length }
+    );
+    const t = e >= 0 ? e : 0, s = this._siblings.length, a = this._siblings[t], i = this._state === "submitting", r = t === 0 || i, d = t === s - 1 || i, g = new Date(a.startedUtc), h = Number.isNaN(g.getTime()) ? a.startedUtc : g.toLocaleTimeString();
     return o`
       <div class="picker-row" role="group" aria-label="Iteration picker">
         <uui-button
@@ -846,6 +846,12 @@ n.styles = f`
       font-size: var(--uui-type-small-size, 0.875rem);
       font-variant-numeric: tabular-nums;
     }
+
+    .picker-empty-batch {
+      margin: 0 0 var(--uui-size-space-3) 0;
+      color: var(--uui-color-text-alt);
+      font-style: italic;
+    }
   `;
 l([
   c()
@@ -886,7 +892,7 @@ l([
 n = l([
   y("cogworks-agent-feedback")
 ], n);
-const I = [
+const A = [
   {
     type: "modal",
     alias: "Ua.Modal.RunDetail",
@@ -911,7 +917,7 @@ const I = [
     type: "dashboard",
     alias: "Cogworks.AgentMemory.Dashboard.MemoryWall",
     name: "Memory Learning Wall",
-    element: () => import("./cogworks-memory-wall.element-Dp2PUYKX.js"),
+    element: () => import("./cogworks-memory-wall.element-sf_vyVTe.js"),
     weight: 100,
     meta: {
       label: "Memory Learning Wall",
@@ -927,7 +933,7 @@ const I = [
 ];
 export {
   p as A,
-  b as a,
-  I as m
+  m as a,
+  A as m
 };
-//# sourceMappingURL=index-D8XFU7Ps.js.map
+//# sourceMappingURL=index-BO7BtkZC.js.map

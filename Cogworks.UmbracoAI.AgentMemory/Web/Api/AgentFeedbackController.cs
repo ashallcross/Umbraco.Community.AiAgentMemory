@@ -178,8 +178,15 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
         Guid agentId;
         if (!string.IsNullOrWhiteSpace(request.SelectedRunId))
         {
-            var selectedRun = runs.SingleOrDefault(r =>
-                string.Equals(r.RunId, request.SelectedRunId, StringComparison.Ordinal));
+            var matches = runs.Where(r =>
+                string.Equals(r.RunId, request.SelectedRunId, StringComparison.Ordinal)).ToList();
+            if (matches.Count > 1)
+            {
+                _logger.LogWarning(
+                    "AgentFeedbackController.PostAsync — SelectedRunId={SelectedRunId} matched {MatchCount} rows within ThreadId={ThreadId} group; single-row-per-RunId contract violated. Recording against first match.",
+                    request.SelectedRunId, matches.Count, request.RunId);
+            }
+            var selectedRun = matches.Count > 0 ? matches[0] : null;
             if (selectedRun is null)
             {
                 _logger.LogWarning(
@@ -240,8 +247,14 @@ public sealed class AgentFeedbackController : ManagementApiControllerBase
         {
             return (true, $"comment cannot exceed {CommentMaxChars} characters (received {request.Comment.Length}).");
         }
-        // Story 4.12 — selectedRunId is optional; cap symmetric with RunId so
-        // an oversized field can't drive resource exhaustion.
+        // Story 4.12 — selectedRunId is optional. When supplied as a non-null
+        // string it must be non-whitespace (symmetric with the RunId
+        // validation rule above); silently treating whitespace-only as
+        // "legacy mode" would mask client contract drift.
+        if (request.SelectedRunId is not null && string.IsNullOrWhiteSpace(request.SelectedRunId))
+        {
+            return (true, "selectedRunId cannot be whitespace; omit the field for the legacy ThreadId-keyed path.");
+        }
         if (request.SelectedRunId is { Length: > RunIdMaxChars })
         {
             return (true, $"selectedRunId cannot exceed {RunIdMaxChars} characters (received {request.SelectedRunId.Length}).");

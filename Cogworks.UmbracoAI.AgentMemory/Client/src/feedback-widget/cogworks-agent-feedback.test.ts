@@ -445,7 +445,7 @@ describe("cogworks-agent-feedback — Story 4.5 Previous-feedback block", () => 
     }
   });
 
-  it("Edit button click pre-populates _score and _comment", async () => {
+  it("Edit button click pre-populates _score and _comment (form stays empty pre-click; DRIFT-4.12-CR-3)", async () => {
     const currentUserId = "user-current-bbb";
     const stub = stubFetchByEndpoint({
       runDetail: makeRunDetailBody(),
@@ -461,13 +461,31 @@ describe("cogworks-agent-feedback — Story 4.5 Previous-feedback block", () => 
     });
     try {
       const element = await makeElement({ currentUserId });
-      // One-shot seed populated _score/_comment on load.
-      const scoreEl = (element as unknown as {
+      const internals = (element as unknown as {
         _score: string | null;
         _comment: string;
       });
-      expect(scoreEl._score).to.equal("ThumbsUp");
-      expect(scoreEl._comment).to.equal("previous comment");
+
+      // DRIFT-4.12-CR-3 — no auto-seed; form is empty on initial load even
+      // when the existing-feedback row matches the current user.
+      expect(internals._score, "no auto-seed on load").to.be.null;
+      expect(internals._comment, "no auto-seed on load").to.equal("");
+
+      // Click Edit → seed fires; form populates from the prior row.
+      const editButton = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      ).find((b) => (b.getAttribute("label") ?? "") === "Edit");
+      expect(editButton, "Edit button visible on current-user row").to.not.be.undefined;
+      editButton!.dispatchEvent(new Event("click"));
+      await element.updateComplete;
+      // _onEditClick awaits updateComplete + scrolls + focuses — let those
+      // microtasks settle.
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(internals._score, "score seeded from prior row after Edit click").to.equal("ThumbsUp");
+      expect(internals._comment, "comment seeded from prior row after Edit click").to.equal(
+        "previous comment",
+      );
     } finally {
       stub.restore();
     }
@@ -645,7 +663,7 @@ describe("cogworks-agent-feedback — Story 4.5 Submit-disable-on-no-change", ()
     document.body.replaceChildren();
   });
 
-  it("disables Submit when form state equals existing-feedback row + re-enables on mutation + re-disables on revert", async () => {
+  it("disables Submit when form state equals existing-feedback row + re-enables on mutation + re-disables on revert (DRIFT-4.12-CR-3: Edit must be clicked first to seed)", async () => {
     const currentUserId = "user-current-aaa";
     const stub = stubFetchByEndpoint({
       runDetail: makeRunDetailBody(),
@@ -661,25 +679,35 @@ describe("cogworks-agent-feedback — Story 4.5 Submit-disable-on-no-change", ()
     });
     try {
       const element = await makeElement({ currentUserId });
-      const buttons = Array.from(
-        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
-      );
-      const submitButton = buttons.find((b) =>
-        (b.getAttribute("label") ?? "") === "Submit feedback",
-      ) as (HTMLElement & { disabled: boolean }) | undefined;
-      expect(submitButton).to.not.be.undefined;
-      // Initial state: form seeded from existing row → Submit disabled.
-      expect(submitButton!.hasAttribute("disabled")).to.be.true;
-
-      // Mutate comment via the widget's internal state field, then trigger
-      // re-render. (Direct internal mutation is the most stable signal in a
-      // shadow-DOM test; the production path uses the uui-textarea @input
-      // event.)
       const internals = element as unknown as {
+        _score: string | null;
         _comment: string;
         requestUpdate: () => Promise<void>;
         updateComplete: Promise<boolean>;
       };
+
+      // DRIFT-4.12-CR-3 — no auto-seed; click Edit first to populate the form
+      // so Submit-disable-on-no-change can be exercised.
+      const editButton = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      ).find((b) => (b.getAttribute("label") ?? "") === "Edit");
+      expect(editButton, "Edit button rendered on current-user row").to.not.be.undefined;
+      editButton!.dispatchEvent(new Event("click"));
+      await element.updateComplete;
+      await new Promise((r) => setTimeout(r, 10));
+
+      // After Edit: form seeded; Submit disabled (form equals existing row).
+      const submitButton = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      ).find((b) => (b.getAttribute("label") ?? "") === "Submit feedback") as
+        (HTMLElement & { disabled: boolean }) | undefined;
+      expect(submitButton, "Submit button rendered after Edit click").to.not.be.undefined;
+      expect(
+        submitButton!.hasAttribute("disabled"),
+        "Submit disabled when form equals existing row post-Edit",
+      ).to.be.true;
+
+      // Mutate comment → form differs from existing row → Submit enabled.
       internals._comment = "seeded comment edited";
       await internals.requestUpdate();
       await internals.updateComplete;
@@ -740,6 +768,10 @@ function stubFetchByEndpointStory412(opts: {
     if (isPost && url.includes("/feedback")) {
       return opts.feedbackPost?.() ?? makeJsonResponse({}, 200);
     }
+    // ORDER IS LOAD-BEARING. The `/runs/{tid}/siblings` URL also matches
+    // `/runs/` — `/siblings` MUST be checked first or the siblings response
+    // would be served by the runDetail branch, silently breaking every picker
+    // test. Do not reorder without updating this guard.
     if (url.includes("/siblings")) {
       return makeJsonResponse(opts.siblings ?? [], opts.siblingsStatus ?? 200);
     }
@@ -776,7 +808,6 @@ function makeSibling(runId: string, startedUtc: string) {
     threadId: "thread-batch-1",
     runId,
     startedUtc,
-    isCurrent: false,
   };
 }
 
@@ -1109,17 +1140,45 @@ describe("cogworks-agent-feedback — Story 4.12 picker", () => {
       expect(prevDuring.hasAttribute("disabled"), "← disabled during submit").to.be.true;
       expect(nextDuring.hasAttribute("disabled"), "→ disabled during submit").to.be.true;
 
-      // Release the submit; state moves to "success"; arrows re-enable.
+      // P6 — click-on-disabled must be a no-op for the handler. Direct
+      // invocation of the picker handler verifies the in-handler `_state ===
+      // "submitting"` early-return is the load-bearing guard (the disabled
+      // attribute on the uui-button is the affordance; the early-return is
+      // the contract).
+      const selectedBefore = (element as unknown as { _selectedRunId: string | null })._selectedRunId;
+      const onPickerChange = (element as unknown as {
+        _onPickerChange: (i: number) => Promise<void>;
+      })._onPickerChange.bind(element);
+      await onPickerChange(1);
+      await element.updateComplete;
+      expect(
+        (element as unknown as { _selectedRunId: string | null })._selectedRunId,
+        "_onPickerChange during submit is a no-op (does NOT mutate _selectedRunId)",
+      ).to.equal(selectedBefore);
+
+      // Release the submit; state moves to "success"; render the success
+      // branch — but the success branch hides the picker entirely (it shows
+      // the "Feedback recorded" copy + Close button), so we assert the state
+      // flip itself + that the form is no longer in "submitting".
       resolveSubmit!(new Response(JSON.stringify({}), { status: 200 }));
       await waitUntil(() => internals._state === "success", "state did not finish submitting");
       await element.updateComplete;
+
+      // P10 — after the submit resolves, `_state === "success"` so the form
+      // re-renders the success branch. Picker arrows aren't part of the
+      // success view, but a follow-up submission (form re-opened) would no
+      // longer find `_state === "submitting"`, so the picker arrows would
+      // re-enable. Asserting the state-flip is the verifiable contract here;
+      // the disabled-attribute removal is a consequence of `_state` leaving
+      // "submitting".
+      expect(internals._state, "submit-in-flight cleared after resolve").to.equal("success");
     } finally {
       globalThis.fetch = originalFetch;
       stub.restore();
     }
   });
 
-  it("hides the picker when siblings list is empty (empty-batch ThreadId edge)", async () => {
+  it("hides the picker AND renders the empty-batch error copy when siblings list is empty (AC3.g + AC5 test 8 + § Failure edges)", async () => {
     const stub = stubFetchByEndpointStory412({
       siblings: [],
       runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
@@ -1136,6 +1195,14 @@ describe("cogworks-agent-feedback — Story 4.12 picker", () => {
       expect(prev, "empty siblings → picker hidden").to.be.undefined;
       const internals = element as unknown as { _selectedRunId: string | null };
       expect(internals._selectedRunId, "no selectedRunId initialised when batch is empty").to.be.null;
+
+      // P1 — empty-batch error-state copy spec-locked at AC3.g + § Failure
+      // edges. Picker is hidden; explicit notice surfaces so the editor isn't
+      // misled into thinking this is a normal single-iteration view.
+      const emptyBatchNotice = element.shadowRoot?.querySelector(".picker-empty-batch");
+      expect(emptyBatchNotice, "empty-batch error-state notice rendered").to.not.be.null;
+      expect(emptyBatchNotice!.textContent).to.contain("No iterations available");
+      expect(emptyBatchNotice!.textContent).to.contain("workflow may have iterated over zero items");
     } finally {
       stub.restore();
     }
@@ -1196,6 +1263,206 @@ describe("cogworks-agent-feedback — Story 4.12 picker", () => {
       expect(lastPostBody!.comment).to.equal("iteration-1 teaching");
     } finally {
       globalThis.fetch = originalFetch;
+      stub.restore();
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // DRIFT-4.12-CR-2 (Adam UX reversal 2026-05-28) — clear _score / _comment
+  // on every picker navigation. Each iteration is a distinct page; cross-
+  // iteration draft leakage reads as "iter-1's feedback rendering against
+  // iter-2" and defeats the per-iteration teaching flow. Reverts the P22
+  // preserve-draft contract (D3 option b ratified 2026-05-27).
+  // ───────────────────────────────────────────────────────────────────────
+
+  it("clears typed comment + selected score on picker navigation (DRIFT-4.12-CR-2)", async () => {
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const internals = element as unknown as {
+        _score: string | null;
+        _comment: string;
+        _selectedRunId: string | null;
+        _runDetailState: string;
+        requestUpdate: () => Promise<void>;
+      };
+
+      // Editor types a draft against iteration 1.
+      internals._score = "ThumbsDown";
+      internals._comment = "iteration-1 draft — work in progress";
+      await internals.requestUpdate();
+      await element.updateComplete;
+
+      // Editor clicks → to navigate to iteration 2. Re-query buttons after
+      // each navigation because the shadow DOM re-renders and previously-
+      // queried button references become detached.
+      const nextButtons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const next = nextButtons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Next iteration",
+      )!;
+      next.dispatchEvent(new Event("click"));
+      await waitUntil(
+        () => internals._selectedRunId === "rid-step-2"
+          && internals._runDetailState === "loaded",
+        "navigation to iteration 2 did not settle",
+      );
+      await element.updateComplete;
+
+      // Draft is cleared on navigation — iteration 2 renders a fresh form.
+      // The seed logic in _loadExistingFeedback will populate _score/_comment
+      // from iteration 2's OWN existing feedback row if present; the stub
+      // returns empty feedback so the form stays empty.
+      expect(internals._score, "score draft cleared on nav").to.be.null;
+      expect(internals._comment, "comment draft cleared on nav").to.equal("");
+
+      // Navigate back to iteration 1 — also fresh (no seed since stub returns
+      // empty feedback for both iterations). Re-query buttons.
+      const prevButtons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const prev = prevButtons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Previous iteration",
+      )!;
+      prev.dispatchEvent(new Event("click"));
+      await waitUntil(
+        () => internals._selectedRunId === "rid-step-1"
+          && internals._runDetailState === "loaded",
+        "navigation back to iteration 1 did not settle",
+      );
+      await element.updateComplete;
+      expect(internals._score, "iteration 1 form is also fresh after nav back").to.be.null;
+      expect(internals._comment, "iteration 1 comment is fresh after nav back").to.equal("");
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it("submit success on iteration N transitions to success state (form not cleared client-side; modal close is the dismissal path)", async () => {
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const internals = element as unknown as {
+        _score: string | null;
+        _comment: string;
+        _state: string;
+        requestUpdate: () => Promise<void>;
+      };
+      internals._score = "ThumbsUp";
+      internals._comment = "submit this draft";
+      await internals.requestUpdate();
+      await element.updateComplete;
+
+      const buttons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const submit = buttons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Submit feedback",
+      )!;
+      submit.dispatchEvent(new Event("click"));
+      await waitUntil(() => internals._state === "success", "submit did not reach success");
+      await element.updateComplete;
+
+      // After Submit success, _state === "success" so the success branch
+      // renders ("Feedback recorded" copy + Close button). The form's draft
+      // state is no longer user-visible; explicit dismissal closes the
+      // modal. (Pre-P22, picker nav synchronously cleared _score/_comment;
+      // P22 preserves them — the success branch is now the canonical "form
+      // is done" surface.)
+      expect(internals._state).to.equal("success");
+      const text = element.shadowRoot?.textContent ?? "";
+      expect(text, "success branch rendered").to.contain("Thanks — your feedback was recorded");
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it("picker navigation after submit clears the success state + resets the form for the next iteration (DRIFT-4.12-CR-1)", async () => {
+    // Adam-reported UX bug 2026-05-28: after submitting feedback for one
+    // iteration in a batch, navigating to the next iteration via the picker
+    // arrows kept rendering "Thanks — your feedback was recorded" instead of
+    // surfacing the form fresh for the new iteration's thumb. Per-iteration
+    // teaching loop was effectively unusable after the first submission.
+    //
+    // The fix: _onPickerChange resets _state from "success" → "idle" AND
+    // clears _score / _comment so the new iteration's form renders fresh.
+    // P22 preserve-draft contract still applies pre-submit (when _state is
+    // "idle" or "error"); this post-submit reset is its counterpart.
+    const stub = stubFetchByEndpointStory412({
+      siblings: makeThreeIterationsSiblings(),
+      runDetail: makeRunDetailBody({ runId: "thread-batch-1" }),
+      feedback: makeFeedbackBody([], "thread-batch-1"),
+    });
+    try {
+      const element = await makeBatchElement({});
+      const internals = element as unknown as {
+        _score: string | null;
+        _comment: string;
+        _state: string;
+        _selectedRunId: string | null;
+        _runDetailState: string;
+        requestUpdate: () => Promise<void>;
+      };
+
+      // Submit feedback against iteration 1.
+      internals._score = "ThumbsUp";
+      internals._comment = "iteration-1 teaching";
+      await internals.requestUpdate();
+      await element.updateComplete;
+
+      const submitButtons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const submit = submitButtons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Submit feedback",
+      )!;
+      submit.dispatchEvent(new Event("click"));
+      await waitUntil(() => internals._state === "success", "submit did not succeed");
+      await element.updateComplete;
+
+      // Success branch is rendering — confirm.
+      expect(element.shadowRoot?.textContent ?? "").to.contain(
+        "Thanks — your feedback was recorded",
+      );
+
+      // Editor navigates to iteration 2 via the picker. Re-query buttons —
+      // success branch renders the picker via _renderAgentOutput, so arrows
+      // are present.
+      const navButtons = Array.from(
+        element.shadowRoot?.querySelectorAll("uui-button") ?? [],
+      );
+      const next = navButtons.find(
+        (b) => (b.getAttribute("label") ?? "") === "Next iteration",
+      );
+      expect(next, "picker arrows render even in success branch").to.not.be.undefined;
+      next!.dispatchEvent(new Event("click"));
+      await waitUntil(
+        () => internals._selectedRunId === "rid-step-2"
+          && internals._state === "idle"
+          && internals._runDetailState === "loaded",
+        "post-submit navigation did not reset to idle form state",
+      );
+      await element.updateComplete;
+
+      // Form is fresh for the new iteration: state back to idle, no
+      // success banner, score/comment cleared so the editor can thumb anew.
+      expect(internals._state, "state reset to idle for new iteration").to.equal("idle");
+      expect(internals._score, "score cleared so new iteration starts fresh").to.be.null;
+      expect(internals._comment, "comment cleared so new iteration starts fresh").to.equal("");
+      expect(
+        element.shadowRoot?.textContent ?? "",
+        "success copy no longer rendering",
+      ).to.not.contain("Thanks — your feedback was recorded");
+    } finally {
       stub.restore();
     }
   });

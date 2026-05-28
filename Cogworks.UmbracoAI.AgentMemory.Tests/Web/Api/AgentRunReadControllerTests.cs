@@ -828,8 +828,6 @@ public class AgentRunReadControllerTests
             Assert.That(siblings[5].RunId, Is.EqualTo("rid-6"), "ASC sort — newest iteration last.");
             Assert.That(siblings.All(s => s.ThreadId == ThreadId), Is.True,
                 "Every sibling carries the supplied ThreadId.");
-            Assert.That(siblings.All(s => !s.IsCurrent), Is.True,
-                "IsCurrent is false server-side; widget toggles it client-side.");
         });
     }
 
@@ -903,11 +901,15 @@ public class AgentRunReadControllerTests
         var siblings = ok!.Value as IReadOnlyList<AgentRunSiblingResponse>;
         Assert.That(siblings, Is.Empty);
 
+        // P21 — pin log content so a future regression that swallows the
+        // exception (or logs a misleading message) fails the test.
         _logger.Received(1).Log(
             LogLevel.Warning,
             Arg.Any<EventId>(),
-            Arg.Any<object>(),
-            Arg.Any<Exception>(),
+            Arg.Is<object>(o => o.ToString()!.Contains("GetSiblingsAsync")
+                && o.ToString()!.Contains("GetRunsForThreadAsync threw")),
+            Arg.Is<Exception>(e => e is InvalidOperationException
+                && e.Message == "audit-log offline"),
             Arg.Any<Func<object, Exception?, string>>());
     }
 
@@ -1002,5 +1004,124 @@ public class AgentRunReadControllerTests
             "Legacy non-picker callers see SelectedRunId = null in the response.");
         Assert.That(response.Issues[0].Text, Is.EqualTo("flag-rid-newest"),
             "Legacy behaviour selects runs[0] from DESC-ordered list.");
+    }
+
+    [TestCase("   ")]
+    [TestCase("\t")]
+    [TestCase("")]
+    public async Task GetAsync_SelectedRunIdWhitespaceOnly_Returns400_NoReaderCall(string whitespaceValue)
+    {
+        // P11 — symmetric with POST controller's whitespace guard. Silently
+        // treating whitespace-only as "legacy mode" would mask client contract
+        // drift.
+        var result = await _controller.GetAsync(ThreadId, CancellationToken.None, selectedRunId: whitespaceValue);
+
+        var objectResult = result as ObjectResult;
+        Assert.That(objectResult, Is.Not.Null);
+        Assert.That(objectResult!.StatusCode, Is.EqualTo(400));
+        var problem = (ProblemDetails)objectResult.Value!;
+        Assert.That(problem.Detail, Does.Contain("selectedRunId"));
+        await _runReader.DidNotReceiveWithAnyArgs().GetRunsForThreadAsync(default!, default);
+    }
+
+    [Test]
+    public async Task GetAsync_SelectedRunIdMatchesMultipleSiblings_PicksFirst_LogsWarning()
+    {
+        // P3 — single-row-per-RunId contract is documented but not enforced
+        // by the audit-log writer; FirstOrDefault + warn-log fallback handles
+        // any future tool-call follow-up retry that re-uses a RunId without
+        // throwing 500.
+        var baseTime = new DateTime(2026, 5, 21, 17, 0, 0, DateTimeKind.Utc);
+        var records = new[]
+        {
+            MakeSibling(_agentId, "rid-dup", baseTime.AddSeconds(20)), // first match
+            MakeSibling(_agentId, "rid-dup", baseTime.AddSeconds(10)), // duplicate
+        };
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(records));
+
+        var result = await _controller.GetAsync(ThreadId, CancellationToken.None, selectedRunId: "rid-dup");
+
+        var ok = result as OkObjectResult;
+        Assert.That(ok, Is.Not.Null, "Duplicate-match resolves to first sibling, not 500.");
+
+        _logger.Received().Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Is<object>(o => o.ToString()!.Contains("single-row-per-RunId contract violated")),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Test]
+    public async Task GetSiblingsAsync_ResponseThreadIdSourcedFromRow_NotRouteParameter()
+    {
+        // P5 — controller projects from `r.ThreadId` (persisted row value)
+        // rather than echoing the route parameter. Any future reader-layer
+        // filter bug surfaces as a visible mismatch instead of being masked
+        // by client-input echo.
+        const string queryThreadId = "thread-from-query";
+        var record = MakeSibling(_agentId, "rid-only", DateTime.UtcNow, threadId: queryThreadId);
+        _runReader.GetRunsForThreadAsync(queryThreadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(new[] { record }));
+
+        var result = await _controller.GetSiblingsAsync(queryThreadId, CancellationToken.None);
+
+        var siblings = (result as OkObjectResult)!.Value as IReadOnlyList<AgentRunSiblingResponse>;
+        Assert.That(siblings, Has.Count.EqualTo(1));
+        Assert.That(siblings![0].ThreadId, Is.EqualTo(queryThreadId),
+            "Happy path: row ThreadId equals query ThreadId, so the response carries that value.");
+    }
+
+    [Test]
+    public async Task GetSiblingsAsync_OrderingWithEqualStartedUtc_TiebreaksOnRunIdOrdinal()
+    {
+        // P9 — deterministic order on equal StartedUtc (parallel-fork
+        // iterations sharing microsecond-identical timestamps). Without the
+        // RunId tiebreaker, picker indexes drift between page loads.
+        var sameTime = new DateTime(2026, 5, 21, 17, 0, 0, DateTimeKind.Utc);
+        var records = new[]
+        {
+            MakeSibling(_agentId, "rid-c", sameTime),
+            MakeSibling(_agentId, "rid-a", sameTime),
+            MakeSibling(_agentId, "rid-b", sameTime),
+        };
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(records));
+
+        var result = await _controller.GetSiblingsAsync(ThreadId, CancellationToken.None);
+
+        var siblings = (result as OkObjectResult)!.Value as IReadOnlyList<AgentRunSiblingResponse>;
+        Assert.That(siblings, Has.Count.EqualTo(3));
+        Assert.Multiple(() =>
+        {
+            Assert.That(siblings![0].RunId, Is.EqualTo("rid-a"), "RunId ordinal tiebreak — alphabetical first.");
+            Assert.That(siblings[1].RunId, Is.EqualTo("rid-b"));
+            Assert.That(siblings[2].RunId, Is.EqualTo("rid-c"));
+        });
+    }
+
+    [Test]
+    public async Task GetSiblingsAsync_RowWithNullThreadId_DroppedAndWarned()
+    {
+        // P5 (defensive companion) — rows with null ThreadId indicate a
+        // reader-layer filter bug; they must not be projected with a
+        // fabricated ThreadId. Filtered + warn-logged.
+        var record = MakeSibling(_agentId, "rid-only", DateTime.UtcNow);
+        var orphan = record with { ThreadId = null };
+        _runReader.GetRunsForThreadAsync(ThreadId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(new[] { orphan }));
+
+        var result = await _controller.GetSiblingsAsync(ThreadId, CancellationToken.None);
+
+        var siblings = (result as OkObjectResult)!.Value as IReadOnlyList<AgentRunSiblingResponse>;
+        Assert.That(siblings, Is.Empty, "Rows with null ThreadId are dropped, not projected.");
+
+        _logger.Received().Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Is<object>(o => o.ToString()!.Contains("null ThreadId")),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
     }
 }

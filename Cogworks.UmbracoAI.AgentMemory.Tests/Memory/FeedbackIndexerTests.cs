@@ -778,12 +778,16 @@ public class FeedbackIndexerTests
         await _indexer.IndexAsync(threadId, _agentId, CancellationToken.None);
 
         // Both reader methods called, in order: GetRunAsync first (returns
-        // null), then GetRunsForThreadAsync as fallback.
+        // null), then GetRunsForThreadAsync as fallback. P18 — also pin
+        // EXACT call counts so a future regression that retries GetRunAsync
+        // (or fires GetRunsForThreadAsync twice) is caught.
         Received.InOrder(() =>
         {
             _runReader.GetRunAsync(threadId, Arg.Any<CancellationToken>());
             _runReader.GetRunsForThreadAsync(threadId, Arg.Any<CancellationToken>());
         });
+        await _runReader.Received(1).GetRunAsync(threadId, Arg.Any<CancellationToken>());
+        await _runReader.Received(1).GetRunsForThreadAsync(threadId, Arg.Any<CancellationToken>());
 
         // Digest reaches the embed call — pins the fallback path doesn't
         // silently skip the row.
@@ -791,6 +795,38 @@ public class FeedbackIndexerTests
             Arg.Any<Action<AIEmbeddingBuilder>>(),
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task IndexAsync_SelectedRunIdNotInThreadGroup_SkipsRatherThanMisTagging()
+    {
+        // P4 — when AgentFeedbackController passes a per-iteration RunId
+        // (Story 4.12 picker), GetRunAsync(runId) is the canonical resolution
+        // path. If GetRunAsync returns null AND the fallback
+        // GetRunsForThreadAsync(runId) returns rows whose RunId != supplied
+        // runId AND whose ThreadId != supplied runId, the indexer MUST skip
+        // rather than embed runs[0]'s content under the wrong RunId.
+        // Otherwise memory entries are persisted with iteration X's prompt/
+        // response tagged as feedback for iteration Y.
+        const string supplied = "rid-step-2";
+        _runReader.GetRunAsync(supplied, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AgentRunRecord?>(null));
+        // Fallback returns siblings under a DIFFERENT ThreadId — i.e. the
+        // reader-layer didn't find the supplied runId as a ThreadId either.
+        var crossThreadRuns = new[]
+        {
+            MakeRun(runId: "rid-step-1") with { ThreadId = "different-thread" },
+        };
+        _runReader.GetRunsForThreadAsync(supplied, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentRunRecord>>(crossThreadRuns));
+
+        await _indexer.IndexAsync(supplied, _agentId, CancellationToken.None);
+
+        // No embed call — the indexer skipped to avoid mis-tagging.
+        await _embeddingService.DidNotReceiveWithAnyArgs().GenerateEmbeddingAsync(
+            default(Action<AIEmbeddingBuilder>)!, default!, default);
+        await _vectorStore.DidNotReceiveWithAnyArgs().UpsertAsync(
+            default!, default!, default, default, default!, default!, default);
     }
 
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>

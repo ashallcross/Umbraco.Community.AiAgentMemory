@@ -33,5 +33,4 @@ namespace Cogworks.UmbracoAI.AgentMemory.Web.Api.Models;
 public sealed record AgentRunSiblingResponse(
     string ThreadId,
     string RunId,
-    DateTime StartedUtc,
-    bool IsCurrent);
+    DateTime StartedUtc);

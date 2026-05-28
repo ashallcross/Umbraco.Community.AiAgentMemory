@@ -170,8 +170,17 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
-        // Story 4.12 — selectedRunId is opt-in; validate length symmetric with
-        // runId so an oversized query string can't drive resource exhaustion.
+        // Story 4.12 — selectedRunId is opt-in. When supplied as a non-null
+        // string it must be non-whitespace (symmetric with the runId rule
+        // above); silently treating whitespace-only as "legacy mode" would
+        // mask client contract drift.
+        if (selectedRunId is not null && string.IsNullOrWhiteSpace(selectedRunId))
+        {
+            return Problem(
+                title: "Invalid selected run identifier.",
+                detail: "selectedRunId cannot be whitespace; omit the query parameter for the legacy ThreadId-keyed path.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
         if (selectedRunId is not null && selectedRunId.Length > RunIdMaxChars)
         {
             return Problem(
@@ -209,12 +218,20 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
         if (!string.IsNullOrWhiteSpace(selectedRunId))
         {
             // Story 4.12 picker — pick the named iteration from the ThreadId
-            // group. SingleOrDefault keeps the v0.1 single-row-per-RunId
-            // contract honest (DRIFT-NEW-3 / Story 1.2 § Remarks). Unknown
-            // selectedRunId surfaces as 404 so the widget reverts to its
-            // previous selection.
-            var match = runs.SingleOrDefault(r =>
-                string.Equals(r.RunId, selectedRunId, StringComparison.Ordinal));
+            // group. FirstOrDefault + duplicate-detection log preserves the
+            // v0.1 single-row-per-RunId contract (DRIFT-NEW-3 / Story 1.2
+            // § Remarks) without throwing 500 on contract violation; a future
+            // tool-call follow-up retry that re-uses a RunId surfaces as
+            // Warning. Unknown selectedRunId surfaces as 404.
+            var matches = runs.Where(r =>
+                string.Equals(r.RunId, selectedRunId, StringComparison.Ordinal)).ToList();
+            if (matches.Count > 1)
+            {
+                _logger.LogWarning(
+                    "AgentRunReadController.GetAsync — selectedRunId={SelectedRunId} matched {MatchCount} rows within ThreadId={ThreadId} group; single-row-per-RunId contract violated. Returning first match.",
+                    selectedRunId, matches.Count, runId);
+            }
+            var match = matches.Count > 0 ? matches[0] : null;
             if (match is null)
             {
                 _logger.LogDebug(
@@ -330,16 +347,34 @@ public sealed class AgentRunReadController : ManagementApiControllerBase
             return Ok(Array.Empty<AgentRunSiblingResponse>());
         }
 
-        // ASC sort + project. Empty list is the legitimate response for
-        // unknown ThreadIds (not 404 — the picker is the natural place to
-        // surface "no iterations" copy; the modal stays usable).
+        // ASC sort with RunId tiebreaker (deterministic order when parallel-
+        // fork iterations share microsecond-identical StartedUtc) + project.
+        // The response's ThreadId is sourced from the row (not the route
+        // parameter) so any reader-layer filter bug surfaces as a visible
+        // mismatch rather than being masked by client-input echo. Rows with
+        // null ThreadId are filtered out + warn-logged; that shape indicates
+        // a reader-layer bug and shouldn't reach the widget. Empty list is
+        // the legitimate response for unknown ThreadIds (not 404 — the
+        // picker is the natural place to surface "no iterations" copy; the
+        // modal stays usable).
         var siblings = runs
+            .Where(r =>
+            {
+                if (r.ThreadId is null)
+                {
+                    _logger.LogWarning(
+                        "AgentRunReadController.GetSiblingsAsync — IAgentRunReader returned a row with null ThreadId for query ThreadId={ThreadId}, RunId={RunId}; dropping. Indicates reader-layer filter bug.",
+                        threadId, r.RunId);
+                    return false;
+                }
+                return true;
+            })
             .OrderBy(r => r.StartedUtc)
+            .ThenBy(r => r.RunId, StringComparer.Ordinal)
             .Select(r => new AgentRunSiblingResponse(
-                ThreadId: threadId,
+                ThreadId: r.ThreadId!,
                 RunId: r.RunId,
-                StartedUtc: r.StartedUtc,
-                IsCurrent: false))
+                StartedUtc: r.StartedUtc))
             .ToList();
 
         return Ok((IReadOnlyList<AgentRunSiblingResponse>)siblings);
