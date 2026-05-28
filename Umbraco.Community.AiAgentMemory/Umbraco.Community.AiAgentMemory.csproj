@@ -9,15 +9,16 @@
   <PropertyGroup>
     <PackageId>Umbraco.Community.AiAgentMemory</PackageId>
     <Product>Umbraco.Community.AiAgentMemory</Product>
-    <Title>Cogworks AgentMemory for Umbraco AI</Title>
-    <Version>0.1.0-beta.1</Version>
-    <Description>Persistent memory and learning layer for Umbraco's AI agent stack — agents that get better every time they run.</Description>
-    <Authors>Cogworks</Authors>
-    <PackageTags>umbraco-marketplace;umbraco;ai;agents;memory;learning;automate;cogworks</PackageTags>
+    <Title>AI Agent Memory for Umbraco</Title>
+    <Version>0.1.0</Version>
+    <Description>AI Agent Memory for Umbraco — persistent memory + learning layer for Umbraco's AI agent stack. Editors give thumbs-up / thumbs-down feedback on agent runs via the AI Agent Feedback widget; the package indexes that feedback as searchable memory and injects it into subsequent runs so agents suppress false positives and reuse validated patterns. Composes on Umbraco.AI 1.8+ (vector store via Umbraco.AI.Search). Memory is off by default; per-agent opt-in via appsettings.json. Built for Umbraco v17+.</Description>
+    <Authors>Adam Shallcross</Authors>
+    <PackageTags>umbraco-marketplace;umbraco;ai;agents;memory;learning;automate;umbraco-ai</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>v0.1.0 — initial release. See https://github.com/ashallcross/Umbraco.Community.AiAgentMemory/blob/main/CHANGELOG.md for the full changelog.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/cogworks/Umbraco.Community.AiAgentMemory</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/cogworks/Umbraco.Community.AiAgentMemory.git</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/ashallcross/Umbraco.Community.AiAgentMemory</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ashallcross/Umbraco.Community.AiAgentMemory.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
