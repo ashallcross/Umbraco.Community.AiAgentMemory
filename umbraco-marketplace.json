@@ -1,0 +1,20 @@
+{
+  "$schema": "https://marketplace.umbraco.com/umbraco-marketplace-schema.json",
+  "Title": "AI Agent Memory for Umbraco",
+  "Description": "Persistent memory + learning layer for Umbraco's AI agent stack — agents that get better every time they run. Editor feedback teaches agents to suppress false positives. Composes on Umbraco.AI 1.8+.",
+  "Category": "Artificial Intelligence",
+  "AlternateCategory": "Editor",
+  "PackageType": "Package",
+  "LicenseTypes": ["Free"],
+  "Tags": ["ai", "agents", "memory", "learning", "umbraco-ai", "umbraco-automate", "umbraco-marketplace"],
+  "DocumentationUrl": "https://github.com/ashallcross/Umbraco.Community.AiAgentMemory#readme",
+  "IssueTrackerUrl": "https://github.com/ashallcross/Umbraco.Community.AiAgentMemory/issues",
+  "AuthorDetails": {
+    "Name": "Adam Shallcross",
+    "Description": "CEO & Founder at Cogworks. Umbraco advocate, interested in how humans and AI can work together in harmony.",
+    "Url": "https://www.wearecogworks.com",
+    "ImageUrl": "https://github.com/ashallcross.png",
+    "SyncContributorsFromRepository": true
+  },
+  "Screenshots": []
+}
