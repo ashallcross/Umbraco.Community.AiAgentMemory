@@ -1,10 +1,10 @@
 // Entry point for the Umbraco.Community.AiAgentMemory frontend bundle.
 // Bellissima reads NAMED exports from this module (per Story 0.A § Locked
 // decision (c)). The side-effect import below MUST come BEFORE the `manifests`
-// export so `customElements.define("cogworks-agent-feedback", ...)` has run
+// export so `customElements.define("aiam-agent-feedback", ...)` has run
 // before Bellissima resolves the `elementName` lookup.
 
-import "./feedback-widget/cogworks-agent-feedback.element.js";
+import "./feedback-widget/aiam-agent-feedback.element.js";
 
 // Story 4.9 — Memory Learning Wall dashboard.
 // Dynamic-import form (`element: () => import(...)`) is the canonical
@@ -23,8 +23,8 @@ export const manifests: Array<UmbExtensionManifest> = [
   {
     type: "modal",
     alias: "Ua.Modal.RunDetail",
-    name: "Cogworks Agent Feedback Modal",
-    elementName: "cogworks-agent-feedback",
+    name: "AI Agent Feedback Modal",
+    elementName: "aiam-agent-feedback",
     weight: 10000,
   },
   // Story 4.9 — Memory Learning Wall dashboard. Mounts under the existing
@@ -44,7 +44,7 @@ export const manifests: Array<UmbExtensionManifest> = [
     type: "dashboard",
     alias: "Cogworks.AgentMemory.Dashboard.MemoryWall",
     name: "Memory Learning Wall",
-    element: () => import("./memory-wall/cogworks-memory-wall.element.js"),
+    element: () => import("./memory-wall/aiam-memory-wall.element.js"),
     weight: 100,
     meta: {
       label: "Memory Learning Wall",

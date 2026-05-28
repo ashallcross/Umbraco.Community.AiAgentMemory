@@ -1,9 +1,9 @@
 import { expect, waitUntil } from "@open-wc/testing";
 import "axe-core";
-import "./cogworks-memory-wall.element.js";
-import type { CogworksMemoryWallElement } from "./cogworks-memory-wall.element.js";
+import "./aiam-memory-wall.element.js";
+import type { AiamMemoryWallElement } from "./aiam-memory-wall.element.js";
 
-type TestableWallElement = CogworksMemoryWallElement & {
+type TestableWallElement = AiamMemoryWallElement & {
   getContext: () => Promise<unknown>;
   updateComplete: Promise<boolean>;
 };
@@ -79,7 +79,7 @@ function makeEntry(overrides: Partial<WireEntry> = {}): WireEntry {
 
 async function makeElement(): Promise<TestableWallElement> {
   const element = document.createElement(
-    "cogworks-memory-wall",
+    "aiam-memory-wall",
   ) as TestableWallElement;
   element.getContext = async () => makeAuthContext();
   document.body.append(element);
@@ -94,7 +94,7 @@ async function makeElement(): Promise<TestableWallElement> {
   return element;
 }
 
-describe("cogworks-memory-wall — Memory Learning Wall dashboard", () => {
+describe("aiam-memory-wall — Memory Learning Wall dashboard", () => {
   afterEach(() => {
     document.body.replaceChildren();
   });
@@ -145,7 +145,7 @@ describe("cogworks-memory-wall — Memory Learning Wall dashboard", () => {
 
       // Agent display names land on the `headline` attribute of each uui-box
       // (the headline renders in uui-box's OWN shadow root, not the wall's
-      // shadow root textContent — see cogworks-agent-feedback.test.ts:241 for
+      // shadow root textContent — see aiam-agent-feedback.test.ts:241 for
       // the precedent on querying headline by attribute).
       const headlines = groupBoxes
         .map((b) => b.getAttribute("headline"))

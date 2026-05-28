@@ -5,9 +5,9 @@ export default defineConfig({
     lib: {
       entry: "src/index.ts",
       formats: ["es"],
-      fileName: "cogworks-umbracoai-agentmemory",
+      fileName: "umbraco-community-aiagentmemory",
     },
-    outDir: "../wwwroot/App_Plugins/CogworksUmbracoAIAgentMemory",
+    outDir: "../wwwroot/App_Plugins/UmbracoCommunityAiAgentMemory",
     emptyOutDir: true,
     sourcemap: true,
     rollupOptions: {

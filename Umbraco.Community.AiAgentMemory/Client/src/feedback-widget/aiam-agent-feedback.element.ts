@@ -118,8 +118,8 @@ type AgentRunFeedbackEntry = {
  * prompting. A pure-state inline confirm OR Bellissima confirm-modal pattern is
  * a candidate when v0.2 ships broader UX polish.
  */
-@customElement("cogworks-agent-feedback")
-export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
+@customElement("aiam-agent-feedback")
+export class AiamAgentFeedbackElement extends UmbModalBaseElement<
   AgentFeedbackModalData,
   // The modal doesn't emit a return value — feedback is fire-and-go via POST.
   // The editor closes the modal manually (X / Esc) after the success state.
@@ -926,7 +926,7 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
     if (selectedIndex < 0) {
       // eslint-disable-next-line no-console
       console.warn(
-        "[cogworks-agent-feedback] picker: _selectedRunId is not present in _siblings; falling back to index 0. Submit will POST the orphan RunId.",
+        "[aiam-agent-feedback] picker: _selectedRunId is not present in _siblings; falling back to index 0. Submit will POST the orphan RunId.",
         { selectedRunId: this._selectedRunId, siblingCount: this._siblings.length },
       );
     }
@@ -1488,6 +1488,6 @@ export class CogworksAgentFeedbackElement extends UmbModalBaseElement<
 
 declare global {
   interface HTMLElementTagNameMap {
-    "cogworks-agent-feedback": CogworksAgentFeedbackElement;
+    "aiam-agent-feedback": AiamAgentFeedbackElement;
   }
 }

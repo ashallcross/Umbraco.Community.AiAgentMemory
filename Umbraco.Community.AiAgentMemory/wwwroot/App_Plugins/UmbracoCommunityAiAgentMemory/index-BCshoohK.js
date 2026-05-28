@@ -7,41 +7,41 @@ class p extends Error {
     super(...arguments), this.name = "AuthContextUnavailableError";
   }
 }
-async function m(e, t, i) {
+async function m(e, t, s) {
   const a = await e();
   if (!a)
     throw new p("Auth context unavailable");
-  const s = a.getOpenApiConfiguration();
+  const i = a.getOpenApiConfiguration();
   let r;
   try {
-    r = await s.token();
+    r = await i.token();
   } catch {
     throw new p("Token acquisition failed");
   }
   if (!r || r.trim() === "")
     throw new p("Token acquisition returned empty");
-  const d = i.body !== void 0, g = {
+  const d = s.body !== void 0, g = {
     Accept: "application/json",
     Authorization: `Bearer ${r}`,
     ...d ? { "Content-Type": "application/json" } : {}
-  }, h = { ...i.headers ?? {} };
+  }, h = { ...s.headers ?? {} };
   delete h.Authorization, delete h.authorization;
   const _ = {
     ...g,
     ...h
   };
-  return fetch(`${s.base}${t}`, {
-    method: i.method ?? "GET",
-    credentials: s.credentials,
-    signal: i.signal,
+  return fetch(`${i.base}${t}`, {
+    method: s.method ?? "GET",
+    credentials: i.credentials,
+    signal: s.signal,
     headers: _,
-    body: d ? JSON.stringify(i.body) : void 0
+    body: d ? JSON.stringify(s.body) : void 0
   });
 }
-var x = Object.defineProperty, w = Object.getOwnPropertyDescriptor, l = (e, t, i, a) => {
-  for (var s = a > 1 ? void 0 : a ? w(t, i) : t, r = e.length - 1, d; r >= 0; r--)
-    (d = e[r]) && (s = (a ? d(t, i, s) : d(s)) || s);
-  return a && s && x(t, i, s), s;
+var x = Object.defineProperty, w = Object.getOwnPropertyDescriptor, l = (e, t, s, a) => {
+  for (var i = a > 1 ? void 0 : a ? w(t, s) : t, r = e.length - 1, d; r >= 0; r--)
+    (d = e[r]) && (i = (a ? d(t, s, i) : d(i)) || i);
+  return a && i && x(t, s, i), i;
 };
 let n = class extends k {
   constructor() {
@@ -57,17 +57,17 @@ let n = class extends k {
         this._state = "error", this._errorMessage = "Couldn't load this run's details. Refresh the page and try again.";
         return;
       }
-      const t = this._selectedRunId, i = this._score, a = this._comment;
+      const t = this._selectedRunId, s = this._score, a = this._comment;
       this._abortController?.abort(), this._abortController = new AbortController(), this._state = "submitting", this._errorMessage = "";
       try {
-        const s = await m(
+        const i = await m(
           () => this.getContext(b),
           "/umbraco/management/api/v1/cogworks-agent-memory/feedback",
           {
             method: "POST",
             body: {
               runId: e,
-              score: i,
+              score: s,
               comment: a.length > 0 ? a : null,
               // Story 4.12 — picker submissions include selectedRunId so the
               // controller records feedback under the per-iteration RunId
@@ -79,15 +79,15 @@ let n = class extends k {
             signal: this._abortController.signal
           }
         );
-        if (s.ok) {
+        if (i.ok) {
           this._state = "success";
           return;
         }
-        await this._handleHttpError(s);
-      } catch (s) {
-        if (s instanceof DOMException && s.name === "AbortError")
+        await this._handleHttpError(i);
+      } catch (i) {
+        if (i instanceof DOMException && i.name === "AbortError")
           return;
-        if (s instanceof p) {
+        if (i instanceof p) {
           this._state = "error", this._errorMessage = "Couldn't authenticate your backoffice session. Refresh the page and try again.";
           return;
         }
@@ -114,23 +114,23 @@ let n = class extends k {
     if (t.length === 0)
       return this._runDetailState = "unavailable", !1;
     this._runDetailAbortController?.abort();
-    const i = new AbortController();
-    this._runDetailAbortController = i, this._runDetailState = "loading";
+    const s = new AbortController();
+    this._runDetailAbortController = s, this._runDetailState = "loading";
     const a = e !== null ? `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(t)}?selectedRunId=${encodeURIComponent(e)}` : `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(t)}`;
     try {
-      const s = await m(
+      const i = await m(
         () => this.getContext(b),
         a,
-        { signal: i.signal }
+        { signal: s.signal }
       );
-      if (i.signal.aborted || this._selectedRunId !== e)
+      if (s.signal.aborted || this._selectedRunId !== e)
         return !0;
-      if (!s.ok)
+      if (!i.ok)
         return this._runDetailState = "unavailable", !1;
-      const r = await s.json();
-      return i.signal.aborted || this._selectedRunId !== e ? !0 : !Array.isArray(r.issues) || !Array.isArray(r.suggestions) ? (this._runDetailState = "unavailable", !1) : r.score === null && r.issues.length === 0 && r.suggestions.length === 0 && !r.memoryUsed ? (this._runDetailState = "unavailable", !1) : (this._runDetail = r, this._runDetailState = "loaded", !0);
-    } catch (s) {
-      return s instanceof DOMException && s.name === "AbortError" || i.signal.aborted ? !0 : (this._runDetailState = "unavailable", !1);
+      const r = await i.json();
+      return s.signal.aborted || this._selectedRunId !== e ? !0 : !Array.isArray(r.issues) || !Array.isArray(r.suggestions) ? (this._runDetailState = "unavailable", !1) : r.score === null && r.issues.length === 0 && r.suggestions.length === 0 && !r.memoryUsed ? (this._runDetailState = "unavailable", !1) : (this._runDetail = r, this._runDetailState = "loaded", !0);
+    } catch (i) {
+      return i instanceof DOMException && i.name === "AbortError" || s.signal.aborted ? !0 : (this._runDetailState = "unavailable", !1);
     }
   }
   async _loadExistingFeedback(e) {
@@ -138,23 +138,23 @@ let n = class extends k {
     if (t.length === 0)
       return this._existingFeedbackState = "unavailable", !1;
     this._existingFeedbackAbortController?.abort();
-    const i = new AbortController();
-    this._existingFeedbackAbortController = i, this._existingFeedbackState = "loading";
+    const s = new AbortController();
+    this._existingFeedbackAbortController = s, this._existingFeedbackState = "loading";
     const a = e ?? t;
     try {
-      const s = await m(
+      const i = await m(
         () => this.getContext(b),
         `/umbraco/management/api/v1/cogworks-agent-memory/feedback/${encodeURIComponent(a)}`,
-        { signal: i.signal }
+        { signal: s.signal }
       );
-      if (i.signal.aborted || this._selectedRunId !== e)
+      if (s.signal.aborted || this._selectedRunId !== e)
         return !0;
-      if (!s.ok)
+      if (!i.ok)
         return this._existingFeedbackState = "unavailable", !1;
-      const r = await s.json();
-      return i.signal.aborted || this._selectedRunId !== e ? !0 : Array.isArray(r.existing) ? (this._existingFeedback = r.existing, this._existingFeedbackState = "loaded", this._currentUserIdReady !== null && (await this._currentUserIdReady, i.signal.aborted), !0) : (this._existingFeedbackState = "unavailable", !1);
-    } catch (s) {
-      return s instanceof DOMException && s.name === "AbortError" || i.signal.aborted ? !0 : (this._existingFeedbackState = "unavailable", !1);
+      const r = await i.json();
+      return s.signal.aborted || this._selectedRunId !== e ? !0 : Array.isArray(r.existing) ? (this._existingFeedback = r.existing, this._existingFeedbackState = "loaded", this._currentUserIdReady !== null && (await this._currentUserIdReady, s.signal.aborted), !0) : (this._existingFeedbackState = "unavailable", !1);
+    } catch (i) {
+      return i instanceof DOMException && i.name === "AbortError" || s.signal.aborted ? !0 : (this._existingFeedbackState = "unavailable", !1);
     }
   }
   /**
@@ -184,32 +184,32 @@ let n = class extends k {
     const t = new AbortController();
     this._siblingsAbortController = t;
     try {
-      const i = await m(
+      const s = await m(
         () => this.getContext(b),
         `/umbraco/management/api/v1/cogworks-agent-memory/runs/${encodeURIComponent(e)}/siblings`,
         { signal: t.signal }
       );
       if (t.signal.aborted)
         return;
-      if (!i.ok) {
+      if (!s.ok) {
         this._siblingsState = "unavailable", this._kickOffDownstreamFetches(null);
         return;
       }
-      const a = await i.json();
+      const a = await s.json();
       if (t.signal.aborted)
         return;
       if (!Array.isArray(a)) {
         this._siblingsState = "unavailable", this._kickOffDownstreamFetches(null);
         return;
       }
-      const s = a;
-      if (this._siblings = s, this._siblingsState = "loaded", s.length > 1) {
-        const r = s[0].runId;
+      const i = a;
+      if (this._siblings = i, this._siblingsState = "loaded", i.length > 1) {
+        const r = i[0].runId;
         this._selectedRunId = r, this._kickOffDownstreamFetches(r);
       } else
         this._kickOffDownstreamFetches(null);
-    } catch (i) {
-      if (i instanceof DOMException && i.name === "AbortError" || t.signal.aborted)
+    } catch (s) {
+      if (s instanceof DOMException && s.name === "AbortError" || t.signal.aborted)
         return;
       this._siblingsState = "unavailable", this._kickOffDownstreamFetches(null);
     }
@@ -250,7 +250,7 @@ let n = class extends k {
     const t = this._siblings[e];
     if (t.runId === this._selectedRunId) return;
     this._state = "idle", this._errorMessage = "", this._score = null, this._comment = "";
-    const i = [
+    const s = [
       this._selectedRunId,
       this._runDetail,
       this._runDetailState,
@@ -258,17 +258,17 @@ let n = class extends k {
       this._existingFeedbackState
     ];
     this._selectedRunId = t.runId;
-    const [a, s] = await Promise.all([
+    const [a, i] = await Promise.all([
       this._loadRunDetail(t.runId),
       this._loadExistingFeedback(t.runId)
     ]);
-    this._selectedRunId === t.runId && (!a || !s) && ([
+    this._selectedRunId === t.runId && (!a || !i) && ([
       this._selectedRunId,
       this._runDetail,
       this._runDetailState,
       this._existingFeedback,
       this._existingFeedbackState
-    ] = i);
+    ] = s);
   }
   /**
    * Returns the row whose `createdBy` matches the resolved current-user id.
@@ -284,7 +284,7 @@ let n = class extends k {
     return this._state === "success" ? this._renderSuccess() : this._renderForm();
   }
   _renderForm() {
-    const e = this._score !== null, t = this._existingFeedback !== null ? this._findCurrentUserRow(this._existingFeedback) : void 0, i = t?.score === "Neutral" ? null : t?.score ?? null, a = t?.comment ?? "", s = t !== void 0 && this._score === i && this._comment === a, r = !e || this._state === "submitting" || s, d = this._state === "submitting" ? "waiting" : void 0;
+    const e = this._score !== null, t = this._existingFeedback !== null ? this._findCurrentUserRow(this._existingFeedback) : void 0, s = t?.score === "Neutral" ? null : t?.score ?? null, a = t?.comment ?? "", i = t !== void 0 && this._score === s && this._comment === a, r = !e || this._state === "submitting" || i, d = this._state === "submitting" ? "waiting" : void 0;
     return o`
       <umb-body-layout headline="Run Feedback">
         ${this._renderExistingFeedback()}
@@ -389,29 +389,29 @@ let n = class extends k {
     const e = this._existingFeedback;
     if (e === null || e.length === 0)
       return u;
-    const t = this._findCurrentUserRow(e), i = e.filter((s) => s !== t).sort((s, r) => r.createdUtc.localeCompare(s.createdUtc)), a = t !== void 0 ? [t, ...i] : i;
+    const t = this._findCurrentUserRow(e), s = e.filter((i) => i !== t).sort((i, r) => r.createdUtc.localeCompare(i.createdUtc)), a = t !== void 0 ? [t, ...s] : s;
     return o`
       <uui-box headline="Previous feedback" class="previous-feedback-box">
-        ${a.map((s) => this._renderExistingFeedbackRow(s, s === t))}
+        ${a.map((i) => this._renderExistingFeedbackRow(i, i === t))}
       </uui-box>
     `;
   }
   _renderExistingFeedbackRow(e, t) {
-    const i = e.score === "ThumbsUp" ? "👍" : e.score === "ThumbsDown" ? "👎" : "•", a = e.createdByDisplayName ?? "An editor";
-    let s = e.createdUtc;
+    const s = e.score === "ThumbsUp" ? "👍" : e.score === "ThumbsDown" ? "👎" : "•", a = e.createdByDisplayName ?? "An editor";
+    let i = e.createdUtc;
     try {
       const r = new Date(e.createdUtc);
-      Number.isNaN(r.getTime()) || (s = r.toLocaleString());
+      Number.isNaN(r.getTime()) || (i = r.toLocaleString());
     } catch {
     }
     return o`
       <div class="previous-feedback-row">
         <p class="previous-feedback-content">
-          <span class="previous-feedback-emoji" aria-hidden="true">${i}</span>
+          <span class="previous-feedback-emoji" aria-hidden="true">${s}</span>
           ${e.comment !== null && e.comment.length > 0 ? o`<span class="previous-feedback-comment">${e.comment}</span>` : o`<span class="previous-feedback-no-comment">(no comment)</span>`}
         </p>
         <p class="previous-feedback-footer">
-          ${a} · ${s}
+          ${a} · ${i}
         </p>
         ${t && e.score !== "Neutral" ? o`<uui-button
               look="secondary"
@@ -476,10 +476,10 @@ let n = class extends k {
       (_) => _.runId === this._selectedRunId
     );
     e < 0 && console.warn(
-      "[cogworks-agent-feedback] picker: _selectedRunId is not present in _siblings; falling back to index 0. Submit will POST the orphan RunId.",
+      "[aiam-agent-feedback] picker: _selectedRunId is not present in _siblings; falling back to index 0. Submit will POST the orphan RunId.",
       { selectedRunId: this._selectedRunId, siblingCount: this._siblings.length }
     );
-    const t = e >= 0 ? e : 0, i = this._siblings.length, a = this._siblings[t], s = this._state === "submitting", r = t === 0 || s, d = t === i - 1 || s, g = new Date(a.startedUtc), h = Number.isNaN(g.getTime()) ? a.startedUtc : g.toLocaleTimeString();
+    const t = e >= 0 ? e : 0, s = this._siblings.length, a = this._siblings[t], i = this._state === "submitting", r = t === 0 || i, d = t === s - 1 || i, g = new Date(a.startedUtc), h = Number.isNaN(g.getTime()) ? a.startedUtc : g.toLocaleTimeString();
     return o`
       <div class="picker-row" role="group" aria-label="Iteration picker">
         <uui-button
@@ -493,7 +493,7 @@ let n = class extends k {
           ←
         </uui-button>
         <span class="picker-counter" aria-live="polite">
-          Iteration ${t + 1} of ${i} · ${h}
+          Iteration ${t + 1} of ${s} · ${h}
         </span>
         <uui-button
           compact
@@ -547,7 +547,7 @@ let n = class extends k {
           </p>
         </uui-box>
       `;
-    const e = this._runDetail, t = e.issues.length > 0, i = e.suggestions.length > 0, a = e.score !== null || t || i, s = e.memoryUsed && e.citedMemories.length > 0;
+    const e = this._runDetail, t = e.issues.length > 0, s = e.suggestions.length > 0, a = e.score !== null || t || s, i = e.memoryUsed && e.citedMemories.length > 0;
     return o`
       <uui-box headline="Agent output" class="agent-output-box">
         ${e.memoryUsed ? o`<uui-tag
@@ -579,7 +579,7 @@ let n = class extends k {
     )}
               </ul>
             ` : u}
-        ${i ? o`
+        ${s ? o`
               <h5 class="agent-output-section-heading">Suggestions</h5>
               <ul class="agent-output-suggestions">
                 ${e.suggestions.map(
@@ -590,7 +590,7 @@ let n = class extends k {
         ${a ? u : o`<p class="agent-output-empty-note">
               (no structured output captured for this run)
             </p>`}
-        ${s ? o`
+        ${i ? o`
               <details class="cited-memories-details">
                 <summary>
                   ${e.citedMemories.length === 1 ? "1 memory cited" : `${e.citedMemories.length} memories cited`}
@@ -635,9 +635,9 @@ let n = class extends k {
           return;
         }
         if (t?.errors && typeof t.errors == "object") {
-          const i = Object.values(t.errors)[0];
-          if (Array.isArray(i) && typeof i[0] == "string") {
-            this._state = "error", this._errorMessage = i[0];
+          const s = Object.values(t.errors)[0];
+          if (Array.isArray(s) && typeof s[0] == "string") {
+            this._state = "error", this._errorMessage = s[0];
             return;
           }
         }
@@ -900,14 +900,14 @@ l([
   c()
 ], n.prototype, "_selectedRunId", 2);
 n = l([
-  y("cogworks-agent-feedback")
+  y("aiam-agent-feedback")
 ], n);
 const A = [
   {
     type: "modal",
     alias: "Ua.Modal.RunDetail",
-    name: "Cogworks Agent Feedback Modal",
-    elementName: "cogworks-agent-feedback",
+    name: "AI Agent Feedback Modal",
+    elementName: "aiam-agent-feedback",
     weight: 1e4
   },
   // Story 4.9 — Memory Learning Wall dashboard. Mounts under the existing
@@ -927,7 +927,7 @@ const A = [
     type: "dashboard",
     alias: "Cogworks.AgentMemory.Dashboard.MemoryWall",
     name: "Memory Learning Wall",
-    element: () => import("./cogworks-memory-wall.element-C6tPBj4N.js"),
+    element: () => import("./aiam-memory-wall.element-WL0Gikhp.js"),
     weight: 100,
     meta: {
       label: "Memory Learning Wall",
@@ -946,4 +946,4 @@ export {
   m as a,
   A as m
 };
-//# sourceMappingURL=index-DxsQJH3F.js.map
+//# sourceMappingURL=index-BCshoohK.js.map

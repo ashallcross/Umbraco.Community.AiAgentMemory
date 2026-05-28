@@ -119,7 +119,7 @@ dotnet run --project Umbraco.Community.AiAgentMemory.TestSite
 cd Umbraco.Community.AiAgentMemory/Client
 npm install
 npm run watch    # rebuilds on changes
-npm run build    # production build to ../wwwroot/App_Plugins/CogworksUmbracoAIAgentMemory/
+npm run build    # production build to ../wwwroot/App_Plugins/UmbracoCommunityAiAgentMemory/
 npm test         # web-test-runner
 ```
 

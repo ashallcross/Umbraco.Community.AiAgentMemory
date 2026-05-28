@@ -6,7 +6,7 @@
  * that this helper inherits verbatim from LlmsTxt Story 6.0b.
  *
  * Widget-element behaviour is covered separately by
- * `feedback-widget/cogworks-agent-feedback.test.ts`; this file stays focused
+ * `feedback-widget/aiam-agent-feedback.test.ts`; this file stays focused
  * on the shared bearer-token fetch helper.
  */
 

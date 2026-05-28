@@ -1,13 +1,13 @@
 import { LitElement as m, html as i, nothing as d, css as g, state as c, customElement as p } from "@umbraco-cms/backoffice/external/lit";
 import { UmbElementMixin as b } from "@umbraco-cms/backoffice/element-api";
 import { UMB_AUTH_CONTEXT as h } from "@umbraco-cms/backoffice/auth";
-import { a as y, A as _ } from "./index-DxsQJH3F.js";
-var f = Object.defineProperty, w = Object.getOwnPropertyDescriptor, s = (t, e, a, r) => {
-  for (var l = r > 1 ? void 0 : r ? w(e, a) : e, n = t.length - 1, u; n >= 0; n--)
+import { a as y, A as _ } from "./index-BCshoohK.js";
+var f = Object.defineProperty, v = Object.getOwnPropertyDescriptor, s = (t, e, a, r) => {
+  for (var l = r > 1 ? void 0 : r ? v(e, a) : e, n = t.length - 1, u; n >= 0; n--)
     (u = t[n]) && (l = (r ? u(e, a, l) : u(l)) || l);
   return r && l && f(e, a, l), l;
 };
-const v = 200;
+const w = 200;
 let o = class extends b(m) {
   constructor() {
     super(...arguments), this._state = "loading", this._entries = [], this._errorMessage = "", this._abortController = null;
@@ -190,7 +190,7 @@ let o = class extends b(m) {
                     <uui-table-cell class="digest-cell">
                       ${this._truncate(
           this._cleanDigestForDisplay(a.digestText ?? ""),
-          v
+          w
         )}
                     </uui-table-cell>
                   </uui-table-row>
@@ -282,11 +282,11 @@ s([
   c()
 ], o.prototype, "_errorMessage", 2);
 o = s([
-  p("cogworks-memory-wall")
+  p("aiam-memory-wall")
 ], o);
-const C = o;
+const D = o;
 export {
-  o as CogworksMemoryWallElement,
-  C as default
+  o as AiamMemoryWallElement,
+  D as default
 };
-//# sourceMappingURL=cogworks-memory-wall.element-C6tPBj4N.js.map
+//# sourceMappingURL=aiam-memory-wall.element-WL0Gikhp.js.map

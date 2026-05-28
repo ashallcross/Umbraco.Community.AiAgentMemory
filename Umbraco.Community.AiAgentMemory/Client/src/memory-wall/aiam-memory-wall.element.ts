@@ -63,8 +63,8 @@ const DIGEST_SNIPPET_MAX = 200;
  * Lit's auto-encoding template interpolation; the `unsafeHTML` directive is
  * NEVER imported in this file — static grep gate verifies.
  */
-@customElement("cogworks-memory-wall")
-export class CogworksMemoryWallElement extends UmbElementMixin(LitElement) {
+@customElement("aiam-memory-wall")
+export class AiamMemoryWallElement extends UmbElementMixin(LitElement) {
   @state() private _state: WallState = "loading";
   @state() private _entries: MemoryWallEntry[] = [];
   @state() private _errorMessage: string = "";
@@ -411,7 +411,7 @@ export class CogworksMemoryWallElement extends UmbElementMixin(LitElement) {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "cogworks-memory-wall": CogworksMemoryWallElement;
+    "aiam-memory-wall": AiamMemoryWallElement;
   }
 }
 
@@ -422,4 +422,4 @@ declare global {
 // router falls through to a 'Cannot read properties of undefined' crash.
 // Mirrors Umbraco.AI's own canonical pattern at
 // `Umbraco.AI/.../section/dashboard/ai-dashboard.element.ts:67`.
-export default CogworksMemoryWallElement;
+export default AiamMemoryWallElement;

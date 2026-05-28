@@ -1,9 +1,9 @@
 import { expect, waitUntil } from "@open-wc/testing";
 import "axe-core";
-import "./cogworks-agent-feedback.element.js";
-import type { CogworksAgentFeedbackElement } from "./cogworks-agent-feedback.element.js";
+import "./aiam-agent-feedback.element.js";
+import type { AiamAgentFeedbackElement } from "./aiam-agent-feedback.element.js";
 
-type TestableFeedbackElement = CogworksAgentFeedbackElement & {
+type TestableFeedbackElement = AiamAgentFeedbackElement & {
   data: { runId: string };
   getContext: () => Promise<unknown>;
   updateComplete: Promise<boolean>;
@@ -113,7 +113,7 @@ function makeJsonResponse(body: unknown, status = 200) {
 
 async function makeElement(opts: { currentUserId?: string | null } = {}) {
   const element = document.createElement(
-    "cogworks-agent-feedback",
+    "aiam-agent-feedback",
   ) as TestableFeedbackElement;
   element.data = { runId: "run-123" };
   // Multi-context stub. The widget calls `getContext` with:
@@ -170,7 +170,7 @@ async function makeElement(opts: { currentUserId?: string | null } = {}) {
   return element;
 }
 
-describe("cogworks-agent-feedback — agent output render", () => {
+describe("aiam-agent-feedback — agent output render", () => {
   afterEach(() => {
     document.body.replaceChildren();
     delete (globalThis as { __xss?: boolean }).__xss;
@@ -219,7 +219,7 @@ describe("cogworks-agent-feedback — agent output render", () => {
     );
     try {
       const element = document.createElement(
-        "cogworks-agent-feedback",
+        "aiam-agent-feedback",
       ) as TestableFeedbackElement;
       element.data = { runId: "run-123" };
       element.getContext = async () => makeAuthContext();
@@ -389,7 +389,7 @@ describe("cogworks-agent-feedback — agent output render", () => {
 // Story 4.5 — Previous-feedback block + Edit affordance (AC8 / AC11)
 // ─────────────────────────────────────────────────────────────────────────
 
-describe("cogworks-agent-feedback — Story 4.5 Previous-feedback block", () => {
+describe("aiam-agent-feedback — Story 4.5 Previous-feedback block", () => {
   afterEach(() => {
     document.body.replaceChildren();
     delete (globalThis as { __xss?: boolean }).__xss;
@@ -557,7 +557,7 @@ describe("cogworks-agent-feedback — Story 4.5 Previous-feedback block", () => 
 // Story 4.5 — Memory-used badge + cited memories (AC9 / AC11)
 // ─────────────────────────────────────────────────────────────────────────
 
-describe("cogworks-agent-feedback — Story 4.5 Memory-used badge", () => {
+describe("aiam-agent-feedback — Story 4.5 Memory-used badge", () => {
   afterEach(() => {
     document.body.replaceChildren();
     delete (globalThis as { __xss?: boolean }).__xss;
@@ -662,7 +662,7 @@ describe("cogworks-agent-feedback — Story 4.5 Memory-used badge", () => {
 // Story 4.5 — Submit-disable-on-no-change (AC10)
 // ─────────────────────────────────────────────────────────────────────────
 
-describe("cogworks-agent-feedback — Story 4.5 Submit-disable-on-no-change", () => {
+describe("aiam-agent-feedback — Story 4.5 Submit-disable-on-no-change", () => {
   afterEach(() => {
     document.body.replaceChildren();
   });
@@ -833,7 +833,7 @@ async function makeBatchElement(opts: {
   runDetailByUrl?: (url: string) => unknown;
 }) {
   const element = document.createElement(
-    "cogworks-agent-feedback",
+    "aiam-agent-feedback",
   ) as TestableFeedbackElement;
   element.data = { runId: opts.threadId ?? "thread-batch-1" };
   element.getContext = (async () => makeAuthContext()) as unknown as typeof element.getContext;
@@ -868,7 +868,7 @@ async function makeBatchElement(opts: {
   return element;
 }
 
-describe("cogworks-agent-feedback — Story 4.12 picker", () => {
+describe("aiam-agent-feedback — Story 4.12 picker", () => {
   afterEach(() => {
     document.body.replaceChildren();
   });
