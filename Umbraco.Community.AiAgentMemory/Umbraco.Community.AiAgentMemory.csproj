@@ -31,6 +31,18 @@
     <PackageReference Include="Umbraco.AI.Agent" />
     <PackageReference Include="Umbraco.AI.Search" />
     <PackageReference Include="Microsoft.Extensions.AI" />
+    <!-- DRIFT-5.3-5: EF Core 10.0.7 floor pin propagation. The Umbraco.AI fork
+         overlay (Story 2.3 Task 6 — Adam's local fork at gad0117f) was built
+         against EF Core 10.0.7 but its nuspec leaves the floor unstated;
+         without an explicit pin in OUR nupkg, NuGet resolves to 10.0.4 via
+         the Umbraco.Cms transitive graph and adopter sites runtime-fail with
+         FileNotFoundException on the strong-named 10.0.7.0 assembly at first
+         AgentMemoryDbContext resolution. The TestSite csproj papers over this
+         at host level (DRIFT-2.3-impl-3) but that doesn't propagate to nupkg
+         consumers. Floor lives in Directory.Packages.props 10.0.7. This pin
+         can drop once upstream Umbraco.AI publishes a nuspec with the floor. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
   </ItemGroup>
 
   <ItemGroup>
