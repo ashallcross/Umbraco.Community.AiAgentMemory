@@ -16,6 +16,7 @@
     <PackageTags>umbraco-marketplace;umbraco;ai;agents;memory;learning;automate;umbraco-ai</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageReleaseNotes>v0.1.0 — initial release. See https://github.com/ashallcross/Umbraco.Community.AiAgentMemory/blob/main/CHANGELOG.md for the full changelog.</PackageReleaseNotes>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ashallcross/Umbraco.Community.AiAgentMemory</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ashallcross/Umbraco.Community.AiAgentMemory.git</RepositoryUrl>
@@ -61,8 +62,9 @@
     <Folder Include="wwwroot\" />
   </ItemGroup>
 
-  <!-- README in nupkg root for NuGet gallery rendering -->
+  <!-- README + icon in nupkg root for NuGet gallery rendering -->
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="/" />
+    <None Include="..\icon.png" Pack="true" PackagePath="/" Condition="Exists('..\icon.png')" />
   </ItemGroup>
 </Project>
